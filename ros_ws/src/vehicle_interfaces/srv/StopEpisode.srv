@@ -1,0 +1,7 @@
+bool success
+string reason
+---
+bool accepted
+string directory
+uint64 message_count
+string message

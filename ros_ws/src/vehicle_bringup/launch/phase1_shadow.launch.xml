@@ -1,0 +1,32 @@
+<launch>
+  <arg name="enable_camera" default="true"/>
+  <arg name="camera_params"
+       default="$(find-pkg-share vehicle_bringup)/config/front_camera.yaml"/>
+  <arg name="shadow_params"
+       default="$(find-pkg-share vehicle_bringup)/config/phase1_shadow.yaml"/>
+
+  <include file="$(find-pkg-share vehicle_bringup)/launch/phase0.launch.xml"/>
+
+  <node if="$(var enable_camera)" pkg="usb_cam" exec="usb_cam_node_exe"
+        name="front_camera" output="screen">
+    <param from="$(var camera_params)"/>
+    <remap from="image_raw" to="/camera/image_raw"/>
+    <remap from="camera_info" to="/camera/camera_info"/>
+  </node>
+
+  <node if="$(var enable_camera)" pkg="image_transport" exec="republish"
+        name="front_camera_compressor" args="raw compressed" output="screen">
+    <remap from="in" to="/camera/image_raw"/>
+    <remap from="out/compressed" to="/camera/image_compressed"/>
+  </node>
+
+  <node pkg="vehicle_data" exec="observation_monitor"
+        name="observation_monitor" output="screen">
+    <param from="$(var shadow_params)"/>
+  </node>
+
+  <node pkg="vehicle_data" exec="episode_recorder"
+        name="episode_recorder" output="screen">
+    <param from="$(var shadow_params)"/>
+  </node>
+</launch>

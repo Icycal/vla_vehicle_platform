@@ -39,5 +39,23 @@ Build the imported chassis package separately after Phase 0 validation:
 This build validates source compatibility only. Starting `wheeltec_robot_node` is a separate,
 explicit hardware-in-the-loop step and is intentionally outside Phase 0.
 
+## Phase 1 Shadow data
+
+Phase 1 starts the front USB camera, observation health monitor, episode recorder, and the Phase 0
+zero-motion chain. It still does not launch the chassis driver.
+
+```bash
+./scripts/build.sh
+./scripts/run_phase1_shadow.sh
+./scripts/check_phase1_shadow.sh
+./scripts/start_episode.sh episode-test "front camera validation" wheeltec
+./scripts/stop_episode.sh true "validation complete"
+```
+
+Episodes are stored under `datasets/episodes` as rosbag2 data plus an
+`episode_manifest.json`. The current camera calibration file is a placeholder; complete an actual
+checkerboard calibration before enabling `require_calibration` or using images for geometric tasks.
+See `docs/CAMERA_CALIBRATION.md` for the acceptance checklist.
+
 Do not source either legacy workspace before building or running this project. See
 `DEPENDENCIES.md` for source provenance and licensing constraints.

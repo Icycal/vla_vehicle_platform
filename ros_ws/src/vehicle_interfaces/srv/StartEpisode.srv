@@ -1,0 +1,8 @@
+string episode_id
+string task
+string operator_id
+---
+bool accepted
+string resolved_episode_id
+string directory
+string message

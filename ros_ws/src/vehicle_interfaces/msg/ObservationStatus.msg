@@ -1,0 +1,12 @@
+std_msgs/Header header
+bool ready
+bool camera_ready
+bool camera_calibrated
+bool odometry_ready
+bool imu_ready
+float32 camera_age_seconds
+float32 odometry_age_seconds
+float32 imu_age_seconds
+uint32 image_width
+uint32 image_height
+string message

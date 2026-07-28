@@ -10,6 +10,8 @@ find_package(std_msgs REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   msg/ControlLease.msg
+  msg/EpisodeState.msg
+  msg/ObservationStatus.msg
   msg/PolicyAction.msg
   msg/PolicyStatus.msg
   msg/SafetyEvent.msg
@@ -17,6 +19,8 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   msg/TeleopCommand.msg
   srv/RequestControlMode.srv
   srv/RequestSafeStop.srv
+  srv/StartEpisode.srv
+  srv/StopEpisode.srv
   action/AcquireControlLease.action
   DEPENDENCIES action_msgs builtin_interfaces geometry_msgs std_msgs
 )

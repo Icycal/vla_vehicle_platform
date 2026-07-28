@@ -13,6 +13,7 @@ The new platform must not source `/home/wheeltec/wheeltec_ros2/install` or
 | Chassis driver | `third_party/wheeltec_ros2/turn_on_wheeltec_robot` | Wheeltec monorepo `21def27f9a00cc2ec58914572ac34a093c495578` | Behavior-compatible snapshot; one upstream whitespace-only difference was observed before import |
 | Wheeltec messages | `third_party/wheeltec_ros2/wheeltec_robot_msg` | Wheeltec monorepo `21def27f9a00cc2ec58914572ac34a093c495578` | Source snapshot, Git metadata not copied |
 | Serial library | `third_party/wheeltec_ros2/depend/serial_ros2` | `def526d378501e0d19d0a8724971688a3b174080` | Imported from a locally modified working tree; Git metadata not copied |
+| USB camera driver | `third_party/wheeltec_ros2/usb_cam-ros2` | Package version `0.6.1`; repository metadata unavailable in Legacy snapshot | BSD-licensed source snapshot imported from `/home/wheeltec/wheeltec_ros2/src/usb_cam-ros2` |
 
 ## Local compatibility changes
 
@@ -42,6 +43,8 @@ underlay and the new workspace overlay:
 - `vehicle_interfaces`, `vehicle_runtime`, and `vehicle_bringup` build successfully.
 - `serial`, `wheeltec_robot_msg`, `nav2_common`, `nav2_msgs`, and
   `turn_on_wheeltec_robot` build successfully from the vendored source snapshot.
+- `usb_cam`, `vehicle_data`, and the Phase 1 Shadow bringup build successfully from the new
+  workspace. The vehicle currently lacks the optional `camera_calibration` executable package.
 - Phase 0 runs in `ROS_DOMAIN_ID=42`, publishes a zero final `/cmd_vel`, accepts Shadow mode,
   and enters SafeStop on request without launching the chassis driver.
 - The imported serial and chassis sources emit existing compiler warnings. These are recorded

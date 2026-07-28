@@ -1,0 +1,18 @@
+observation_monitor:
+  ros__parameters:
+    camera_timeout: 0.5
+    odometry_timeout: 0.5
+    imu_timeout: 0.5
+    require_camera: true
+    require_calibration: false
+    require_odometry: false
+    require_imu: false
+    publish_frequency: 2.0
+
+episode_recorder:
+  ros__parameters:
+    storage_root: "/home/wheeltec/vla_vehicle_platform/datasets/episodes"
+    minimum_free_space_gb: 10.0
+    max_episode_duration: 900.0
+    image_record_frequency: 5.0
+    require_observation_ready: true

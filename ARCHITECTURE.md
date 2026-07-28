@@ -699,6 +699,11 @@ FaultInjectionSafetyRule
 
 退出条件：模型不控制车辆，延迟、动作质量和数据完整性达到门槛。
 
+截至 2026-07-28，阶段 1 的数据基础设施首批已完成：前视 USB 相机、Observation 健康
+监测、rosbag2 Episode Recorder、压缩图像采样和 Shadow 启动均已在 Orin NX 上验证。
+短 Episode 已记录图像、相机信息、Policy 动作、候选/最终控制和系统状态，测试期间最终
+`/cmd_vel` 保持零。相机几何标定和真实 SmolVLA Provider 尚未完成，因此阶段 1 尚未退出。
+
 ### 阶段 2：低速闭环
 
 - 接入 Action Executor、Safety Guard 和 Control Mux。

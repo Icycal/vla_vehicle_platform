@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>vehicle_data</name>
+  <version>0.1.0</version>
+  <description>C++ observation health and episode recording nodes for VLA shadow data.</description>
+  <maintainer email="guyahui@cpirhzl.com">guyahui</maintainer>
+  <license>Proprietary</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>geometry_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>rclcpp</depend>
+  <depend>rosbag2_cpp</depend>
+  <depend>rosbag2_storage</depend>
+  <depend>sensor_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>vehicle_interfaces</depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

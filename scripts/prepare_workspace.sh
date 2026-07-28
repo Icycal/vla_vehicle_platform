@@ -15,6 +15,7 @@ require_directory() {
 
 require_directory "${WHEELTEC_ROOT}/navigation2-humble"
 require_directory "${WHEELTEC_ROOT}/depend/serial_ros2"
+require_directory "${WHEELTEC_ROOT}/usb_cam-ros2"
 require_directory "${WHEELTEC_ROOT}/turn_on_wheeltec_robot"
 require_directory "${WHEELTEC_ROOT}/wheeltec_robot_msg"
 
@@ -28,6 +29,7 @@ while IFS= read -r -d '' manifest; do
 done < <(find "${WHEELTEC_ROOT}/navigation2-humble" -mindepth 2 -maxdepth 2 -name package.xml -print0)
 
 ln -s "${WHEELTEC_ROOT}/depend/serial_ros2" "${VENDOR_ROOT}/wheeltec/serial_ros2"
+ln -s "${WHEELTEC_ROOT}/usb_cam-ros2" "${VENDOR_ROOT}/wheeltec/usb_cam-ros2"
 ln -s "${WHEELTEC_ROOT}/wheeltec_robot_msg" "${VENDOR_ROOT}/wheeltec/wheeltec_robot_msg"
 ln -s "${WHEELTEC_ROOT}/turn_on_wheeltec_robot" "${VENDOR_ROOT}/wheeltec/turn_on_wheeltec_robot"
 
