@@ -10,7 +10,10 @@
 #include <vehicle_interfaces/msg/episode_state.hpp>
 #include <vehicle_interfaces/msg/observation_status.hpp>
 #include <vehicle_interfaces/msg/policy_action.hpp>
+#include <vehicle_interfaces/msg/policy_observation.hpp>
 #include <vehicle_interfaces/msg/safety_event.hpp>
+#include <vehicle_interfaces/msg/shadow_comparison.hpp>
+#include <vehicle_interfaces/msg/shadow_metrics.hpp>
 #include <vehicle_interfaces/msg/system_state.hpp>
 #include <vehicle_interfaces/srv/start_episode.hpp>
 #include <vehicle_interfaces/srv/stop_episode.hpp>
@@ -92,6 +95,23 @@ public:
       "/vla/policy_action", 10,
       [this](vehicle_interfaces::msg::PolicyAction::SharedPtr message) {
         record_header_message(*message, "/vla/policy_action");
+      });
+    policy_observation_subscription_ =
+      create_subscription<vehicle_interfaces::msg::PolicyObservation>(
+      "/vla/observation", rclcpp::QoS(2).reliable(),
+      [this](vehicle_interfaces::msg::PolicyObservation::SharedPtr message) {
+        record_header_message(*message, "/vla/observation");
+      });
+    shadow_comparison_subscription_ =
+      create_subscription<vehicle_interfaces::msg::ShadowComparison>(
+      "/vla/shadow_comparison", 10,
+      [this](vehicle_interfaces::msg::ShadowComparison::SharedPtr message) {
+        record_header_message(*message, "/vla/shadow_comparison");
+      });
+    shadow_metrics_subscription_ = create_subscription<vehicle_interfaces::msg::ShadowMetrics>(
+      "/vla/shadow_metrics", rclcpp::QoS(1).reliable().transient_local(),
+      [this](vehicle_interfaces::msg::ShadowMetrics::SharedPtr message) {
+        record_header_message(*message, "/vla/shadow_metrics");
       });
     safety_event_subscription_ = create_subscription<vehicle_interfaces::msg::SafetyEvent>(
       "/vla/safety_event", 10,
@@ -411,6 +431,12 @@ private:
     observation_state_subscription_;
   rclcpp::Subscription<vehicle_interfaces::msg::PolicyAction>::SharedPtr
     policy_action_subscription_;
+  rclcpp::Subscription<vehicle_interfaces::msg::PolicyObservation>::SharedPtr
+    policy_observation_subscription_;
+  rclcpp::Subscription<vehicle_interfaces::msg::ShadowComparison>::SharedPtr
+    shadow_comparison_subscription_;
+  rclcpp::Subscription<vehicle_interfaces::msg::ShadowMetrics>::SharedPtr
+    shadow_metrics_subscription_;
   rclcpp::Subscription<vehicle_interfaces::msg::SafetyEvent>::SharedPtr
     safety_event_subscription_;
   rclcpp::Subscription<geometry_msgs::msg::TwistStamped>::SharedPtr vla_command_subscription_;

@@ -41,7 +41,15 @@ ament_target_dependencies(
   vehicle_interfaces
 )
 
-install(TARGETS observation_monitor episode_recorder
+add_executable(shadow_evaluator src/shadow_evaluator_node.cpp)
+ament_target_dependencies(
+  shadow_evaluator
+  geometry_msgs
+  rclcpp
+  vehicle_interfaces
+)
+
+install(TARGETS observation_monitor episode_recorder shadow_evaluator
   DESTINATION lib/${PROJECT_NAME}
 )
 

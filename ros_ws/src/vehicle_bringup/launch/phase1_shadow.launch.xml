@@ -25,6 +25,16 @@
     <param from="$(var shadow_params)"/>
   </node>
 
+  <node pkg="vehicle_adapters" exec="observation_adapter"
+        name="observation_adapter" output="screen">
+    <param from="$(var shadow_params)"/>
+  </node>
+
+  <node pkg="vehicle_data" exec="shadow_evaluator"
+        name="shadow_evaluator" output="screen">
+    <param from="$(var shadow_params)"/>
+  </node>
+
   <node pkg="vehicle_data" exec="episode_recorder"
         name="episode_recorder" output="screen">
     <param from="$(var shadow_params)"/>

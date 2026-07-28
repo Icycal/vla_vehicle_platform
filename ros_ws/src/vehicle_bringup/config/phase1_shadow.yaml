@@ -9,6 +9,19 @@ observation_monitor:
     require_imu: false
     publish_frequency: 2.0
 
+observation_adapter:
+  ros__parameters:
+    publish_frequency: 5.0
+    image_timeout: 0.5
+    observation_validity: 0.5
+    require_status_ready: true
+
+shadow_evaluator:
+  ros__parameters:
+    prediction_timeout: 0.75
+    linear_error_threshold: 0.10
+    angular_error_threshold: 0.20
+
 episode_recorder:
   ros__parameters:
     storage_root: "/home/wheeltec/vla_vehicle_platform/datasets/episodes"

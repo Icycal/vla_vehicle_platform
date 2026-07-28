@@ -4,12 +4,31 @@
 
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <utility>
 #include <vector>
 
 namespace vehicle_runtime
 {
+
+struct PolicyImage
+{
+  std::string key;
+  std::string format;
+  std::vector<uint8_t> data;
+};
+
+struct PolicyObservationInput
+{
+  std::string observation_id;
+  std::string schema_version;
+  std::string task;
+  std::vector<PolicyImage> images;
+  std::vector<std::string> state_keys;
+  std::vector<float> state;
+  std::vector<bool> state_valid;
+};
 
 struct PolicyPrediction
 {
@@ -26,7 +45,7 @@ public:
   virtual bool ready() const = 0;
   virtual std::string provider_id() const = 0;
   virtual std::string model_id() const = 0;
-  virtual PolicyPrediction predict(const std::string & task) = 0;
+  virtual PolicyPrediction predict(const PolicyObservationInput & observation) = 0;
 };
 
 class MockPolicyTransport final : public PolicyTransport
@@ -48,7 +67,7 @@ public:
   std::string provider_id() const override {return "mock";}
   std::string model_id() const override {return "mock-zero-policy-v1";}
 
-  PolicyPrediction predict(const std::string & task) override
+  PolicyPrediction predict(const PolicyObservationInput & observation) override
   {
     PolicyPrediction prediction;
     prediction.request_id = "mock-" + std::to_string(++request_counter_);
@@ -56,7 +75,7 @@ public:
     prediction.control_period = control_period_;
     prediction.actions.resize(horizon_);
 
-    if (!task.empty()) {
+    if (!observation.task.empty() && !observation.images.empty()) {
       for (auto & action : prediction.actions) {
         action.linear.x = linear_velocity_;
         action.angular.z = angular_velocity_;

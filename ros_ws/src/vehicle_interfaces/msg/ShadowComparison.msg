@@ -1,0 +1,12 @@
+std_msgs/Header header
+string request_id
+string observation_id
+string model_id
+builtin_interfaces/Time prediction_generated_at
+builtin_interfaces/Time evaluated_at
+geometry_msgs/Twist predicted
+geometry_msgs/Twist executed
+float32 linear_absolute_error
+float32 angular_absolute_error
+bool within_threshold
+string message

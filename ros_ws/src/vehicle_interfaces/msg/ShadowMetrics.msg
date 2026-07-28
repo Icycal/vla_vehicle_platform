@@ -1,0 +1,10 @@
+std_msgs/Header header
+string model_id
+uint64 sample_count
+float32 linear_mean_absolute_error
+float32 angular_mean_absolute_error
+float32 latest_linear_absolute_error
+float32 latest_angular_absolute_error
+float32 latest_prediction_age_seconds
+bool prediction_fresh
+string message

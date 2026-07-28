@@ -48,6 +48,7 @@ zero-motion chain. It still does not launch the chassis driver.
 ./scripts/build.sh
 ./scripts/run_phase1_shadow.sh
 ./scripts/check_phase1_shadow.sh
+./scripts/check_shadow_contract.sh
 ./scripts/start_episode.sh episode-test "front camera validation" wheeltec
 ./scripts/stop_episode.sh true "validation complete"
 ```
@@ -56,6 +57,10 @@ Episodes are stored under `datasets/episodes` as rosbag2 data plus an
 `episode_manifest.json`. The current camera calibration file is a placeholder; complete an actual
 checkerboard calibration before enabling `require_calibration` or using images for geometric tasks.
 See `docs/CAMERA_CALIBRATION.md` for the acceptance checklist.
+
+The model-independent Observation contract and current state keys are documented in
+`docs/OBSERVATION_CONTRACT.md`. `PolicyAction.observation_id` provides traceability from the input
+image/state/task bundle through prediction and Shadow evaluation.
 
 Do not source either legacy workspace before building or running this project. See
 `DEPENDENCIES.md` for source provenance and licensing constraints.

@@ -12,6 +12,7 @@
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>image_transport</exec_depend>
   <exec_depend>usb_cam</exec_depend>
+  <exec_depend>vehicle_adapters</exec_depend>
   <exec_depend>vehicle_data</exec_depend>
   <exec_depend>vehicle_runtime</exec_depend>
 

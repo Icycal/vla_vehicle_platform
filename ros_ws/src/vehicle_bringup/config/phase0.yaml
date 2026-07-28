@@ -6,6 +6,7 @@ vla_policy_gateway:
     action_horizon: 8
     control_period_ms: 50
     prediction_frequency: 5.0
+    observation_timeout: 0.75
     mock_linear_velocity: 0.0
     mock_angular_velocity: 0.0
 
