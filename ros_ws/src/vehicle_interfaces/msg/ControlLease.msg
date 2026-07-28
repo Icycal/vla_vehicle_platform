@@ -1,0 +1,9 @@
+std_msgs/Header header
+string lease_id
+string controller_id
+string source
+builtin_interfaces/Time expires_at
+float32 max_linear_velocity
+float32 max_angular_velocity
+bool remote
+bool active

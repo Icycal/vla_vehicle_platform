@@ -1,0 +1,66 @@
+# ROS 2 / colcon outputs
+**/build/
+**/install/
+**/log/
+**/logs/
+**/compile_commands.json
+
+# Generated workspace links
+ros_ws/src/vendor/
+
+# Runtime data and large model artifacts
+artifacts/
+bags/
+datasets/
+models/
+recordings/
+*.bag
+*.db3
+*.mcap
+*.onnx
+*.engine
+*.plan
+*.pt
+*.pth
+*.safetensors
+
+# Temporary dependency and deployment archives
+third_party/*.tar
+third_party/*.tar.gz
+third_party/*.tar
+third_party/*.tar.gz
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+
+# Editor and operating-system files
+.idea/
+.vscode/
+*.code-workspace
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Python caches used by upstream tooling only
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# CMake scratch files outside colcon directories
+CMakeCache.txt
+CMakeFiles/
+cmake-build-*/
+
+# Generic temporary files
+*.bak
+*.orig
+*.rej
+*.swp
+*.tmp
+*~

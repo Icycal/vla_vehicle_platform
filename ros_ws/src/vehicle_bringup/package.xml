@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>vehicle_bringup</name>
+  <version>0.1.0</version>
+  <description>Launch and configuration package for the greenfield VLA vehicle platform.</description>
+  <maintainer email="guyahuiguyahui@qq.com">guyahui</maintainer>
+  <license>Proprietary</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>vehicle_runtime</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

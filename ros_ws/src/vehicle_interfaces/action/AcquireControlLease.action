@@ -1,0 +1,13 @@
+string controller_id
+string source
+builtin_interfaces/Duration requested_duration
+float32 requested_max_linear_velocity
+float32 requested_max_angular_velocity
+bool remote
+---
+bool granted
+vehicle_interfaces/ControlLease lease
+string message
+---
+vehicle_interfaces/ControlLease lease
+string status_message

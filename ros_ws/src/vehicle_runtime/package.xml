@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>vehicle_runtime</name>
+  <version>0.1.0</version>
+  <description>C++ runtime nodes for vehicle supervision, policy execution, safety, and control arbitration.</description>
+  <maintainer email="guyahuiguyahui@qq.com">guyahui</maintainer>
+  <license>Proprietary</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>geometry_msgs</depend>
+  <depend>rclcpp</depend>
+  <depend>sensor_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>vehicle_interfaces</depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

@@ -1,0 +1,8 @@
+std_msgs/Header header
+string lease_id
+string controller_id
+uint64 sequence
+builtin_interfaces/Duration valid_for
+bool deadman
+float32 linear_normalized
+float32 angular_normalized
