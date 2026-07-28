@@ -14,13 +14,14 @@ find_package(geometry_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(vehicle_interfaces REQUIRED)
+find_package(vehicle_policy_transport REQUIRED)
 
 add_executable(vehicle_supervisor src/vehicle_supervisor_node.cpp)
 ament_target_dependencies(vehicle_supervisor rclcpp vehicle_interfaces)
 
 add_executable(vla_policy_gateway src/vla_policy_gateway_node.cpp)
-target_include_directories(vla_policy_gateway PRIVATE include)
-ament_target_dependencies(vla_policy_gateway geometry_msgs rclcpp vehicle_interfaces)
+ament_target_dependencies(
+  vla_policy_gateway geometry_msgs rclcpp vehicle_interfaces vehicle_policy_transport)
 
 add_executable(vla_action_runtime src/vla_action_runtime_node.cpp)
 ament_target_dependencies(vla_action_runtime geometry_msgs rclcpp vehicle_interfaces)

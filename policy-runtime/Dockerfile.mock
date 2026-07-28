@@ -1,0 +1,19 @@
+FROM python:3.10-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends protobuf-compiler \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt/vla
+COPY policy-runtime/requirements.txt policy-runtime/requirements.txt
+RUN pip install --no-cache-dir -r policy-runtime/requirements.txt
+
+COPY protocol protocol
+COPY policy-runtime policy-runtime
+RUN policy-runtime/scripts/generate_protocol.sh
+
+ENV PYTHONPATH=/opt/vla/policy-runtime
+ENV POLICY_PROVIDER=mock
+ENV POLICY_SOCKET_PATH=/run/vla-policy/policy.sock
+
+CMD ["python3", "-m", "runtime.server"]

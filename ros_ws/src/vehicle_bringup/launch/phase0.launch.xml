@@ -1,12 +1,15 @@
 <launch>
   <arg name="params_file"
        default="$(find-pkg-share vehicle_bringup)/config/phase0.yaml"/>
+  <arg name="policy_params_file"
+       default="$(find-pkg-share vehicle_bringup)/config/phase0.yaml"/>
 
   <node pkg="vehicle_runtime" exec="vehicle_supervisor" name="vehicle_supervisor" output="screen">
     <param from="$(var params_file)"/>
   </node>
   <node pkg="vehicle_runtime" exec="vla_policy_gateway" name="vla_policy_gateway" output="screen">
     <param from="$(var params_file)"/>
+    <param from="$(var policy_params_file)"/>
   </node>
   <node pkg="vehicle_runtime" exec="vla_action_runtime" name="vla_action_runtime" output="screen">
     <param from="$(var params_file)"/>

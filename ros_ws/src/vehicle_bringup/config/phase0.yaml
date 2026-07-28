@@ -3,6 +3,9 @@ vehicle_supervisor:
 
 vla_policy_gateway:
   ros__parameters:
+    transport: mock
+    socket_path: "/home/wheeltec/vla_vehicle_platform/run/policy/policy.sock"
+    transport_timeout: 1.0
     action_horizon: 8
     control_period_ms: 50
     prediction_frequency: 5.0

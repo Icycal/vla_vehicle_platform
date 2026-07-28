@@ -1,0 +1,75 @@
+syntax = "proto3";
+
+package vla.policy.v1;
+
+message HealthRequest {}
+
+message HealthResponse {
+  bool ready = 1;
+  string provider_id = 2;
+  string model_id = 3;
+  string observation_schema = 4;
+  string action_schema = 5;
+  string message = 6;
+}
+
+message Image {
+  string key = 1;
+  string format = 2;
+  bytes data = 3;
+}
+
+message StateValue {
+  string key = 1;
+  float value = 2;
+  bool valid = 3;
+}
+
+message PredictRequest {
+  string observation_id = 1;
+  string schema_version = 2;
+  string task = 3;
+  int64 generated_at_ns = 4;
+  int64 valid_until_ns = 5;
+  repeated Image images = 6;
+  repeated StateValue state = 7;
+}
+
+message TwistAction {
+  double linear_x = 1;
+  double linear_y = 2;
+  double linear_z = 3;
+  double angular_x = 4;
+  double angular_y = 5;
+  double angular_z = 6;
+}
+
+message PredictResponse {
+  string request_id = 1;
+  string observation_id = 2;
+  string provider_id = 3;
+  string model_id = 4;
+  string action_schema = 5;
+  int64 generated_at_ns = 6;
+  int64 valid_until_ns = 7;
+  int64 control_period_ns = 8;
+  repeated TwistAction actions = 9;
+}
+
+message ErrorResponse {
+  string code = 1;
+  string message = 2;
+}
+
+message Envelope {
+  string protocol_version = 1;
+  string message_id = 2;
+
+  oneof payload {
+    HealthRequest health_request = 10;
+    HealthResponse health_response = 11;
+    PredictRequest predict_request = 12;
+    PredictResponse predict_response = 13;
+    ErrorResponse error_response = 14;
+  }
+}

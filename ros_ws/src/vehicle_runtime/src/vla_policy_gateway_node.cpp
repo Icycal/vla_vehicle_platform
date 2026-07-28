@@ -3,12 +3,15 @@
 #include <vehicle_interfaces/msg/policy_observation.hpp>
 #include <vehicle_interfaces/msg/policy_status.hpp>
 
-#include "vehicle_runtime/policy_transport.hpp"
+#include <vehicle_policy_transport/mock_policy_transport.hpp>
+#include <vehicle_policy_transport/policy_transport.hpp>
+#include <vehicle_policy_transport/unix_socket_policy_transport.hpp>
 
 #include <algorithm>
 #include <chrono>
 #include <functional>
 #include <memory>
+#include <stdexcept>
 #include <string>
 
 using namespace std::chrono_literals;
@@ -19,6 +22,10 @@ public:
   VlaPolicyGateway()
   : Node("vla_policy_gateway")
   {
+    const std::string transport = declare_parameter<std::string>("transport", "mock");
+    const std::string socket_path = declare_parameter<std::string>(
+      "socket_path", "/run/vla-policy/policy.sock");
+    const double transport_timeout = declare_parameter<double>("transport_timeout", 1.0);
     const int horizon = declare_parameter<int>("action_horizon", 8);
     const int control_period_ms = declare_parameter<int>("control_period_ms", 50);
     const double prediction_frequency = declare_parameter<double>("prediction_frequency", 5.0);
@@ -26,11 +33,20 @@ public:
     const double linear_velocity = declare_parameter<double>("mock_linear_velocity", 0.0);
     const double angular_velocity = declare_parameter<double>("mock_angular_velocity", 0.0);
 
-    transport_ = std::make_unique<vehicle_runtime::MockPolicyTransport>(
-      static_cast<std::size_t>(std::max(horizon, 1)),
-      std::chrono::milliseconds(std::max(control_period_ms, 1)),
-      linear_velocity,
-      angular_velocity);
+    if (transport == "mock") {
+      transport_ = std::make_unique<vehicle_policy_transport::MockPolicyTransport>(
+        static_cast<std::size_t>(std::max(horizon, 1)),
+        std::chrono::milliseconds(std::max(control_period_ms, 1)),
+        linear_velocity,
+        angular_velocity);
+    } else if (transport == "unix_socket") {
+      transport_ = std::make_unique<vehicle_policy_transport::UnixSocketPolicyTransport>(
+        socket_path,
+        std::chrono::milliseconds(
+          static_cast<int64_t>(std::max(transport_timeout, 0.01) * 1000.0)));
+    } else {
+      throw std::invalid_argument("Unknown policy transport: " + transport);
+    }
 
     const auto state_qos = rclcpp::QoS(1).reliable().transient_local();
     status_publisher_ = create_publisher<vehicle_interfaces::msg::PolicyStatus>(
@@ -57,6 +73,7 @@ public:
 private:
   void publish_status()
   {
+    transport_->refresh();
     vehicle_interfaces::msg::PolicyStatus message;
     message.header.stamp = now();
     message.state = transport_->ready() ?
@@ -68,7 +85,7 @@ private:
     message.observation_schema = "vehicle.observation.v1";
     message.action_schema = "vehicle.twist_chunk.v1";
     message.inference_latency_ms = last_latency_ms_;
-    message.message = transport_->ready() ? "Mock policy ready" : "Policy unavailable";
+    message.message = transport_->status_message();
     status_publisher_->publish(message);
   }
 
@@ -85,24 +102,34 @@ private:
       return;
     }
     const auto started = std::chrono::steady_clock::now();
-    vehicle_runtime::PolicyObservationInput input;
+    vehicle_policy_transport::PolicyObservationInput input;
     input.observation_id = observation_->observation_id;
     input.schema_version = observation_->schema_version;
     input.task = observation_->task;
+    input.generated_at_ns = rclcpp::Time(observation_->generated_at).nanoseconds();
+    input.valid_until_ns = rclcpp::Time(observation_->valid_until).nanoseconds();
     input.state_keys = observation_->state_keys;
     input.state = observation_->state;
     input.state_valid.assign(
       observation_->state_valid.begin(), observation_->state_valid.end());
     input.images.reserve(observation_->images.size());
     for (std::size_t index = 0; index < observation_->images.size(); ++index) {
-      vehicle_runtime::PolicyImage image;
+      vehicle_policy_transport::PolicyImage image;
       image.key = index < observation_->image_keys.size() ?
         observation_->image_keys[index] : "observation.images.unknown";
       image.format = observation_->images[index].format;
       image.data = observation_->images[index].data;
       input.images.push_back(std::move(image));
     }
-    const auto prediction = transport_->predict(input);
+    vehicle_policy_transport::PolicyPrediction prediction;
+    try {
+      prediction = transport_->predict(input);
+    } catch (const std::exception & error) {
+      RCLCPP_ERROR_THROTTLE(
+        get_logger(), *get_clock(), 2000, "Policy prediction failed: %s", error.what());
+      publish_status();
+      return;
+    }
     const auto stamp = now();
     last_observation_id_ = observation_->observation_id;
 
@@ -110,7 +137,7 @@ private:
     message.header.stamp = stamp;
     message.header.frame_id = "base_link";
     message.request_id = prediction.request_id;
-    message.observation_id = input.observation_id;
+    message.observation_id = prediction.observation_id;
     message.model_id = prediction.model_id;
     message.schema_version = "vehicle.twist_chunk.v1";
     message.generated_at = stamp;
@@ -128,7 +155,7 @@ private:
   double observation_timeout_{0.75};
   float last_latency_ms_{0.0F};
   std::string last_observation_id_;
-  std::unique_ptr<vehicle_runtime::PolicyTransport> transport_;
+  std::unique_ptr<vehicle_policy_transport::PolicyTransport> transport_;
   rclcpp::Publisher<vehicle_interfaces::msg::PolicyStatus>::SharedPtr status_publisher_;
   rclcpp::Publisher<vehicle_interfaces::msg::PolicyAction>::SharedPtr action_publisher_;
   vehicle_interfaces::msg::PolicyObservation::SharedPtr observation_;

@@ -35,12 +35,18 @@ old source workspace. Standard ROS 2 Humble, CUDA, JetPack, compiler, and Ubuntu
 system dependencies. They should be installed in the host or build image at pinned versions rather
 than copied from an old `install/` directory.
 
+The Policy Runtime wire contract additionally uses system `protobuf-compiler` and
+`libprotobuf-dev` for C++ generation. Python Runtime images install the version constrained by
+`policy-runtime/requirements.txt` and generate their bindings inside the image. Generated protocol
+files are build artifacts and are not committed.
+
 ## Jetson validation
 
 Validated on 2026-07-28 at `/home/wheeltec/vla_vehicle_platform` using only the ROS Humble
 underlay and the new workspace overlay:
 
-- `vehicle_interfaces`, `vehicle_runtime`, and `vehicle_bringup` build successfully.
+- `vehicle_interfaces`, `vehicle_policy_transport`, `vehicle_runtime`, and `vehicle_bringup` build
+  successfully.
 - `serial`, `wheeltec_robot_msg`, `nav2_common`, `nav2_msgs`, and
   `turn_on_wheeltec_robot` build successfully from the vendored source snapshot.
 - `usb_cam`, `vehicle_data`, and the Phase 1 Shadow bringup build successfully from the new

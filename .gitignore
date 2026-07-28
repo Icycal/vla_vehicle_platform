@@ -9,6 +9,8 @@
 ros_ws/src/vendor/
 
 # Runtime data and large model artifacts
+/run/
+/policy-runtime/generated/
 artifacts/
 bags/
 datasets/

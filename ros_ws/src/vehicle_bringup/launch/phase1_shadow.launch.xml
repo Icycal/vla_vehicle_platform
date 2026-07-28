@@ -4,8 +4,12 @@
        default="$(find-pkg-share vehicle_bringup)/config/front_camera.yaml"/>
   <arg name="shadow_params"
        default="$(find-pkg-share vehicle_bringup)/config/phase1_shadow.yaml"/>
+  <arg name="policy_params_file"
+       default="$(find-pkg-share vehicle_bringup)/config/phase0.yaml"/>
 
-  <include file="$(find-pkg-share vehicle_bringup)/launch/phase0.launch.xml"/>
+  <include file="$(find-pkg-share vehicle_bringup)/launch/phase0.launch.xml">
+    <arg name="policy_params_file" value="$(var policy_params_file)"/>
+  </include>
 
   <node if="$(var enable_camera)" pkg="usb_cam" exec="usb_cam_node_exe"
         name="front_camera" output="screen">
