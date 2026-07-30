@@ -86,5 +86,9 @@ The Policy Runtime exchanges length-prefixed Protobuf envelopes over
 `run/policy/policy.sock`. It has no ROS dependency and cannot publish `/cmd_vel`. See
 `docs/POLICY_RUNTIME.md` for protocol, provider, container, and failure behavior.
 
+The verified Jetson compute stack and the acceptance gates for the later NVIDIA SmolVLA image are
+recorded in `docs/SMOLVLA_PLATFORM_READINESS.md`. Refresh the inventory with
+`scripts/inspect_smolvla_platform.sh` after JetPack or CUDA changes.
+
 Do not source either legacy workspace before building or running this project. See
 `DEPENDENCIES.md` for source provenance and licensing constraints.

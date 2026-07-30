@@ -75,6 +75,9 @@ kernel's unavailable Docker bridge `raw` table. The running container has networ
 communicates only through the mounted Unix Socket. It runs as the configurable host UID/GID
 (default `1000:1000`) so the C++ Gateway can access the `0660` socket without root privileges.
 
+The Compose healthcheck sends a real Protobuf Health request over the Unix Socket. A live Python
+process with a missing, blocked, or invalid protocol endpoint is therefore reported as unhealthy.
+
 ## Phase 1 Acceptance
 
 - `/vla/policy_state` reports provider `mock-runtime` and model
