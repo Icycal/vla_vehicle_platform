@@ -70,6 +70,11 @@ The compose file exposes the same socket through the project `run/policy` direct
 only for container and protocol validation. The later NVIDIA SmolVLA image will add JetPack-aligned
 CUDA, PyTorch, LeRobot, model assets, GPU access, and a dedicated SmolVLA Provider.
 
+The Mock build uses host networking only while installing build dependencies, avoiding the Jetson
+kernel's unavailable Docker bridge `raw` table. The running container has networking disabled and
+communicates only through the mounted Unix Socket. It runs as the configurable host UID/GID
+(default `1000:1000`) so the C++ Gateway can access the `0660` socket without root privileges.
+
 ## Phase 1 Acceptance
 
 - `/vla/policy_state` reports provider `mock-runtime` and model
