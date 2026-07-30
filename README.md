@@ -90,5 +90,9 @@ The verified Jetson compute stack and the acceptance gates for the later NVIDIA 
 recorded in `docs/SMOLVLA_PLATFORM_READINESS.md`. Refresh the inventory with
 `scripts/inspect_smolvla_platform.sh` after JetPack or CUDA changes.
 
+Build and repeat the validated CUDA/PyTorch GPU test with `scripts/build_pytorch_smoke.sh` and
+`scripts/run_pytorch_smoke.sh`. The test scope and acceptance criteria are documented in
+`docs/PYTORCH_SMOKE.md`.
+
 Do not source either legacy workspace before building or running this project. See
 `DEPENDENCIES.md` for source provenance and licensing constraints.

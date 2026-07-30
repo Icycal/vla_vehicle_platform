@@ -1,0 +1,11 @@
+ARG BASE_IMAGE=vla-pytorch-base:25.05-igpu
+FROM ${BASE_IMAGE}
+
+WORKDIR /opt/vla-smoke
+
+COPY policy-runtime/smoke/cuda_smoke.py /opt/vla-smoke/cuda_smoke.py
+
+ENV PYTHONUNBUFFERED=1
+ENV SMOKE_SECONDS=15
+
+CMD ["python3", "/opt/vla-smoke/cuda_smoke.py"]

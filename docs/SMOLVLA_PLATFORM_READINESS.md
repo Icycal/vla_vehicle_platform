@@ -61,16 +61,37 @@ The Gateway entered `STATE_ERROR`, suppressed invalid actions, retained zero fin
 automatically recovered to `STATE_READY` after the Runtime returned. The Runtime removes stale
 Socket files before binding.
 
+## CUDA PyTorch Smoke Validation
+
+The ARM64 NVIDIA PyTorch `25.05-py3-igpu` base completed both 15-second and 60-second Smoke runs:
+
+- PyTorch: `2.8.0a0+5228986c39.nv25.05`.
+- Container CUDA: `12.9`.
+- cuDNN: `9.10.1`.
+- Device: Orin, compute capability `8.7`, approximately 15.29 GiB unified memory.
+- Sixty-second run: 31,290 FP16 matrix iterations in 61.312 seconds.
+- Matrix and cuDNN convolution outputs remained finite.
+- Peak CUDA allocation: approximately 89.63 MiB.
+- Tegrastats: 66 of 74 samples had active GR3D and 61 samples were at or above 90 percent.
+- Peak GPU temperature: approximately 74.8 degrees Celsius.
+- Peak junction temperature: approximately 75.2 degrees Celsius.
+- Peak input power: approximately 35.3 W.
+- Maximum recorded RAM use: approximately 5.5 GiB; maximum Swap use: 7 MiB.
+- Smoke log contained no error, failure, illegal instruction, out-of-memory, assertion, or
+  segmentation-fault line.
+
+The CUDA/PyTorch base compatibility gate is complete. See `docs/PYTORCH_SMOKE.md` for the
+reproducible build and execution procedure.
+
 ## Next Compatibility Gate
 
-Before implementing `SmolVLAProvider`, select or build an ARM64 NVIDIA base image compatible with
-L4T `R36.4.3` and CUDA `12.6`. The image must prove all of the following on the vehicle:
+Before implementing `SmolVLAProvider`, the next image must add LeRobot without replacing the
+validated Jetson-specific PyTorch installation. It must prove all of the following on the vehicle:
 
-1. CUDA-enabled PyTorch imports successfully.
-2. `torch.cuda.is_available()` returns true.
-3. A small CUDA tensor operation succeeds repeatedly.
-4. LeRobot and the selected SmolVLA revision install without replacing Jetson-specific PyTorch.
-5. Model weights load from the project model volume without requiring root.
-6. Idle and warm inference stay within memory and thermal limits.
+1. LeRobot and the selected SmolVLA revision install without replacing NVIDIA PyTorch.
+2. Existing CUDA Smoke still passes after dependency installation.
+3. Model weights load from the project model volume without requiring root.
+4. A single offline observation produces a valid action chunk.
+5. Idle and warm inference stay within memory and thermal limits.
 
 Run `scripts/inspect_smolvla_platform.sh` to refresh this inventory after system updates.
