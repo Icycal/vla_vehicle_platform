@@ -1,0 +1,72 @@
+ARG BASE_IMAGE=vla-pytorch-base:25.05-igpu
+FROM ${BASE_IMAGE}
+
+ARG LEROBOT_VERSION=0.4.3
+ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+
+ENV PIP_INDEX_URL=${PIP_INDEX_URL}
+ENV PIP_DEFAULT_TIMEOUT=120
+ENV PIP_RETRIES=10
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+ENV PYTHONUNBUFFERED=1
+ENV EXPECTED_LEROBOT_VERSION=${LEROBOT_VERSION}
+
+WORKDIR /opt/vla
+
+COPY policy-runtime/lerobot-compat/requirements.smolvla-inference.txt \
+     /opt/vla/requirements.smolvla-inference.txt
+
+COPY policy-runtime/lerobot-compat/verify_environment.py \
+     /opt/vla/verify_environment.py
+
+RUN python3 - <<'PY'
+import importlib.metadata
+import json
+from pathlib import Path
+
+baseline = {}
+
+for package_name in (
+    "torch",
+    "torchvision",
+    "numpy",
+):
+    baseline[package_name] = (
+        importlib.metadata.version(package_name)
+    )
+
+print("NVIDIA baseline:", baseline)
+
+Path(
+    "/opt/vla/nvidia-package-baseline.json"
+).write_text(
+    json.dumps(
+        baseline,
+        indent=2,
+    )
+)
+PY
+
+RUN python3 -m pip install \
+    --no-cache-dir \
+    uv
+
+RUN uv pip install \
+    --system \
+    --break-system-packages \
+    --no-deps \
+    --index-url "${PIP_INDEX_URL}" \
+    "lerobot==${LEROBOT_VERSION}"
+
+RUN uv pip install \
+    --system \
+    --break-system-packages \
+    --constraint /etc/pip/constraint.txt \
+    --index-url "${PIP_INDEX_URL}" \
+    --requirement \
+      /opt/vla/requirements.smolvla-inference.txt
+
+RUN python3 \
+    /opt/vla/verify_environment.py
+
+CMD ["python3", "/opt/vla/verify_environment.py"]
