@@ -69,4 +69,13 @@ RUN uv pip install \
 RUN python3 \
     /opt/vla/verify_environment.py
 
+COPY policy-runtime/lerobot-compat/download_model.py \
+     /opt/vla/download_model.py
+
+COPY policy-runtime/lerobot-compat/download_dependency.py \
+     /opt/vla/download_dependency.py
+
+COPY policy-runtime/lerobot-compat/verify_model_offline.py \
+     /opt/vla/verify_model_offline.py
+
 CMD ["python3", "/opt/vla/verify_environment.py"]
