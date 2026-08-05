@@ -94,5 +94,36 @@ Build and repeat the validated CUDA/PyTorch GPU test with `scripts/build_pytorch
 `scripts/run_pytorch_smoke.sh`. The test scope and acceptance criteria are documented in
 `docs/PYTORCH_SMOKE.md`.
 
+## SmolVLA image demo
+
+The offline Demo loads the downloaded SmolVLA and SmolVLM2 snapshots, reads three image paths plus
+a six-element test state, and prints the predicted `50 x 6` action chunk. Prepare the runtime-only
+configuration and capture a frame from the current USB camera:
+
+```bash
+cd /home/wheeltec/vla_vehicle_platform
+mkdir -p run/config run/test/smolvla-demo/images
+cp config/smolvla-demo.env.example run/config/smolvla-demo.env
+
+ffmpeg \
+  -hide_banner \
+  -loglevel warning \
+  -f v4l2 \
+  -input_format mjpeg \
+  -video_size 640x480 \
+  -framerate 30 \
+  -i /dev/video0 \
+  -frames:v 1 \
+  -y \
+  run/test/smolvla-demo/images/front.jpg
+
+./scripts/run_smolvla_demo.sh
+```
+
+The one-shot container exits and is removed after inference. Its log remains at
+`run/test/smolvla-demo/logs/image-inference.log`. The example maps the same physical camera frame
+to the model's three camera inputs only to validate the interface. The raw six-dimensional output
+has no Ackermann control semantics and must never be published directly to `/cmd_vel`.
+
 Do not source either legacy workspace before building or running this project. See
 `DEPENDENCIES.md` for source provenance and licensing constraints.

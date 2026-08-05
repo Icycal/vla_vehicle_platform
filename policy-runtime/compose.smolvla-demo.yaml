@@ -1,0 +1,48 @@
+services:
+  smolvla-demo:
+    image: vla-lerobot-compat:0.4.3
+
+    runtime: nvidia
+    network_mode: none
+    ipc: host
+
+    environment:
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+      HF_DATASETS_OFFLINE: "1"
+      HF_HOME: /models/huggingface
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+
+    volumes:
+      - ${VLA_PROJECT_ROOT}/run/models/smolvla_base:/models/smolvla_base:ro
+      - ${VLA_PROJECT_ROOT}/run/models/huggingface:/models/huggingface:ro
+      - ${VLA_PROJECT_ROOT}/policy-runtime/smolvla-demo/run_inference.py:/opt/vla-demo/run_inference.py:ro
+      - ${VLA_PROJECT_ROOT}/run/test/smolvla-demo/images:/demo/images:ro
+
+    command:
+      - python3
+      - /opt/vla-demo/run_inference.py
+
+      - --camera1
+      - ${SMOLVLA_CAMERA1}
+
+      - --camera2
+      - ${SMOLVLA_CAMERA2}
+
+      - --camera3
+      - ${SMOLVLA_CAMERA3}
+
+      - --task
+      - ${SMOLVLA_TASK}
+
+      - --state
+      - ${SMOLVLA_STATE_0}
+      - ${SMOLVLA_STATE_1}
+      - ${SMOLVLA_STATE_2}
+      - ${SMOLVLA_STATE_3}
+      - ${SMOLVLA_STATE_4}
+      - ${SMOLVLA_STATE_5}
+
+      - --print-actions
+      - ${SMOLVLA_PRINT_ACTIONS}

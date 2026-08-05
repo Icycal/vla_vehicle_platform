@@ -51,3 +51,27 @@ The base feature contract contains one six-element state vector, three
 `256x256` RGB observations, and one six-element action vector. This is a
 pretraining contract, not the Ackermann vehicle control contract; an adapter
 must map vehicle observations and policy outputs before Shadow integration.
+
+## Offline Image Inference Demo
+
+The reproducible image Demo is split between versioned source and ignored runtime data:
+
+- `policy-runtime/smolvla-demo/run_inference.py`: tracked inference entry point.
+- `policy-runtime/compose.smolvla-demo.yaml`: tracked container definition.
+- `config/smolvla-demo.env.example`: tracked configuration template.
+- `run/config/smolvla-demo.env`: local runtime configuration.
+- `run/test/smolvla-demo/images`: local camera frames.
+- `run/test/smolvla-demo/logs/image-inference.log`: local inference output.
+
+Run it with:
+
+```bash
+cp config/smolvla-demo.env.example run/config/smolvla-demo.env
+./scripts/run_smolvla_demo.sh
+```
+
+The container runs with no network, mounts model artifacts and Demo inputs read-only, then exits
+and is removed. The validated Orin NX run loaded one real USB camera frame into all three required
+image inputs and produced an action tensor with shape `(1, 50, 6)` in `2.130` seconds. This test
+proves offline image-to-action inference only; it does not define vehicle action semantics or grant
+the model control authority.
