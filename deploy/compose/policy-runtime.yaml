@@ -1,0 +1,22 @@
+services:
+  policy-runtime:
+    image: ${VLA_POLICY_IMAGE}
+    network_mode: none
+    ipc: private
+    read_only: true
+    restart: "no"
+    user: "${POLICY_RUNTIME_UID:-1000}:${POLICY_RUNTIME_GID:-1000}"
+    environment:
+      POLICY_PROVIDER: mock
+      POLICY_SOCKET_PATH: /run/vla-policy/policy.sock
+      POLICY_HEALTH_TIMEOUT: "1.0"
+    volumes:
+      - ${VLA_STATE_ROOT}/policy:/run/vla-policy
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    healthcheck:
+      test: ["CMD", "python3", "-m", "runtime.healthcheck"]
+      interval: 10s
+      timeout: 2s
+      retries: 3
+      start_period: 5s

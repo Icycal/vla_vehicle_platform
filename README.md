@@ -24,6 +24,28 @@ build, launch, check, and episode scripts automatically re-enter the isolated `v
 `docs/ROS_ENVIRONMENTS.md` for profile composition, ROS Domain defaults, command mode, and optional
 aliases.
 
+## Production releases
+
+Production vehicles receive a merged ARM64 ROS install bundle and an exported OCI Policy Runtime
+image instead of the Git repository. Build a release on a dedicated Orin runner:
+
+```bash
+./scripts/build_release.sh --version 0.2.0
+```
+
+Deploy it atomically to the vehicle after the one-time deployer bootstrap:
+
+```bash
+./scripts/deploy_release.sh \
+  --target wheeltec@10.101.70.232 \
+  --archive artifacts/releases/0.2.0/vla-vehicle-0.2.0-arm64.tar.zst \
+  --policy-image artifacts/releases/0.2.0/vla-policy-runtime-0.2.0-arm64.oci.tar.zst \
+  --non-interactive
+```
+
+See `docs/PRODUCTION_DEPLOYMENT.md` and `docs/ORIN_RELEASE_RUNNER.md`. The current production image
+contains the Mock Provider and remains Shadow-only; it never starts `wheeltec_robot_node`.
+
 ## Layout
 
 - `ros_ws/src/vehicle_interfaces`: versioned ROS messages, services, and actions.
