@@ -10,6 +10,20 @@ copies are staging, backup, or deployment mirrors and must not develop an indepe
 Build outputs, generated vendor links, runtime logs, model weights, datasets, and credentials are
 excluded from Git.
 
+## ROS environment isolation
+
+Do not rely on workspace `source` order in `.bashrc`. Open an isolated project shell with:
+
+```bash
+cd /home/wheeltec/vla_vehicle_platform
+./scripts/ros_env.sh vla
+```
+
+Use `wheeltec`, `autoware`, or `rhzd` instead of `vla` when working on a legacy stack. Project
+build, launch, check, and episode scripts automatically re-enter the isolated `vla` profile. See
+`docs/ROS_ENVIRONMENTS.md` for profile composition, ROS Domain defaults, command mode, and optional
+aliases.
+
 ## Layout
 
 - `ros_ws/src/vehicle_interfaces`: versioned ROS messages, services, and actions.

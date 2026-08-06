@@ -9,11 +9,7 @@ if [[ ! -e "${CAMERA_DEVICE}" ]]; then
   exit 1
 fi
 
-source /opt/ros/humble/setup.bash
-source "${PROJECT_ROOT}/ros_ws/install/setup.bash"
-
-export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-43}"
-export RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION:-rmw_cyclonedds_cpp}"
+source "${PROJECT_ROOT}/scripts/ensure_vla_environment.sh" 43 "$@"
 
 echo "Starting front camera from ${CAMERA_DEVICE} in ROS_DOMAIN_ID=${ROS_DOMAIN_ID}."
 exec ros2 launch vehicle_bringup front_camera.launch.xml "$@"
