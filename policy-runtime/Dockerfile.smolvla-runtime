@@ -1,0 +1,17 @@
+ARG BASE_IMAGE=vla-lerobot-compat:0.4.3
+FROM ${BASE_IMAGE}
+
+WORKDIR /opt/vla
+
+COPY policy-runtime/generated /opt/vla/generated
+COPY policy-runtime/runtime /opt/vla/runtime
+
+ENV PYTHONPATH=/opt/vla
+ENV POLICY_PROVIDER=smolvla
+ENV POLICY_OPERATION_MODE=shadow
+ENV POLICY_SOCKET_PATH=/run/vla-policy/policy.sock
+ENV HF_HUB_OFFLINE=1
+ENV TRANSFORMERS_OFFLINE=1
+ENV HF_DATASETS_OFFLINE=1
+
+CMD ["python3", "-m", "runtime.server"]

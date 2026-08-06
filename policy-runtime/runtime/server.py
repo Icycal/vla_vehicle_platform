@@ -69,14 +69,28 @@ def _handle_request(request: protocol.Envelope, provider) -> protocol.Envelope:
         response.health_response.ready = provider.ready()
         response.health_response.provider_id = provider.provider_id
         response.health_response.model_id = provider.model_id
-        response.health_response.observation_schema = "vehicle.observation.v1"
-        response.health_response.action_schema = "vehicle.twist_chunk.v1"
-        response.health_response.message = "Policy runtime ready" if provider.ready() else "Policy runtime unavailable"
+        response.health_response.observation_schema = provider.observation_schema
+        response.health_response.action_schema = provider.action_schema
+        response.health_response.message = provider.status_message
         return response
     if payload == "predict_request":
         response.predict_response.CopyFrom(provider.predict(request.predict_request, protocol))
         return response
     return _error_envelope(request.message_id, "INVALID_REQUEST", "unsupported or missing payload")
+
+
+def _serve_connection(connection: socket.socket, provider) -> None:
+    with connection:
+        connection.settimeout(float(os.environ.get("POLICY_CONNECTION_TIMEOUT", "35.0")))
+        try:
+            request = _receive_envelope(connection)
+            response = _handle_request(request, provider)
+        except Exception as error:
+            response = _error_envelope("", "RUNTIME_ERROR", str(error))
+        try:
+            _send_envelope(connection, response)
+        except (ConnectionError, OSError):
+            return
 
 
 def serve() -> None:
@@ -99,7 +113,7 @@ def serve() -> None:
     try:
         server.bind(str(socket_path))
         os.chmod(socket_path, 0o660)
-        server.listen(8)
+        server.listen(16)
         server.settimeout(1.0)
         print(
             f"Policy runtime listening on {socket_path} "
@@ -115,16 +129,12 @@ def serve() -> None:
                 if stop_event.is_set():
                     break
                 raise
-            with connection:
-                try:
-                    request = _receive_envelope(connection)
-                    response = _handle_request(request, provider)
-                except Exception as error:
-                    response = _error_envelope("", "RUNTIME_ERROR", str(error))
-                try:
-                    _send_envelope(connection, response)
-                except (ConnectionError, OSError):
-                    continue
+            worker = threading.Thread(
+                target=_serve_connection,
+                args=(connection, provider),
+                daemon=True,
+            )
+            worker.start()
     finally:
         server.close()
         if socket_path.exists() or socket_path.is_socket():

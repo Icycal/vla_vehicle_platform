@@ -35,12 +35,18 @@
 - 增加模型无关 `vehicle.observation.v1`、C++ Observation Adapter 和 Observation 有效期检查。
 - Policy Gateway 从任务字符串输入升级为图像、状态和任务的完整 Observation 输入。
 - 增加 C++ Shadow Evaluator、单次动作误差和累计 MAE 指标。
+- 增加常驻 SmolVLA Policy Provider、GPU 预热和真实 Protobuf 推理 Smoke Client。
+- 增加默认零输出与显式仿射两种 Shadow Action Adapter，非 Shadow 模式强制拒绝。
+- Policy Runtime 支持健康检查与长推理并发，C++ Gateway 改为多线程回调避免阻塞相机输入。
 
 ### Validation
 
 - Orin NX 实测相机图像约 12 FPS，Observation Ready，分辨率 640×480。
 - 约 7 秒测试 Episode 记录 29 张压缩图像和 597 条状态/控制消息。
 - Observation、Policy Action 和 Shadow Comparison 的关联 ID 已完成端到端验证。
+- 常驻 SmolVLA 热推理约 0.92--1.05 秒，推理期间健康检查约 0.20 秒返回。
+- 真实相机到 SmolVLA Provider 的 ROS Shadow 链路通过，最终 `/cmd_vel` 保持零。
+- 重叠预测请求会被拒绝，不会累积过期图像队列。
 - 关联测试 Episode 记录 35 组 Observation/Prediction/Comparison 和 28 张图像。
 - 测试期间最终 `/cmd_vel` 始终为零，未启动 `wheeltec_robot_node`。
 

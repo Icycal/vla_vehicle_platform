@@ -1,0 +1,53 @@
+services:
+  smolvla-runtime:
+    image: ${SMOLVLA_RUNTIME_IMAGE:-vla-smolvla-runtime:0.1}
+    container_name: vla-smolvla-runtime
+    runtime: nvidia
+    network_mode: none
+    ipc: host
+    read_only: true
+    restart: "no"
+    user: "${POLICY_RUNTIME_UID:-1000}:${POLICY_RUNTIME_GID:-1000}"
+    environment:
+      POLICY_PROVIDER: smolvla
+      POLICY_OPERATION_MODE: shadow
+      POLICY_SOCKET_PATH: /run/vla-policy/policy.sock
+      POLICY_HEALTH_TIMEOUT: "1.0"
+      POLICY_FAIL_FAST: "1"
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+      HF_DATASETS_OFFLINE: "1"
+      HF_HOME: /models/huggingface
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      SMOLVLA_MODEL_DIR: /models/smolvla_base
+      SMOLVLA_VLM_MANIFEST: /models/huggingface/smolvlm-manifest.json
+      SMOLVLA_MODEL_ID: ${SMOLVLA_MODEL_ID:-smolvla-base-c83c3163}
+      SMOLVLA_SOURCE_IMAGE_KEY: ${SMOLVLA_SOURCE_IMAGE_KEY:-observation.images.front}
+      SMOLVLA_STATE_KEYS: ${SMOLVLA_STATE_KEYS:-observation.state.linear_velocity,observation.state.angular_velocity,observation.state.acceleration_x,observation.state.acceleration_y,observation.state.yaw_rate,observation.state.battery_voltage}
+      SMOLVLA_REQUIRE_VALID_STATE: ${SMOLVLA_REQUIRE_VALID_STATE:-0}
+      SMOLVLA_ALLOW_IMAGE_FALLBACK: ${SMOLVLA_ALLOW_IMAGE_FALLBACK:-1}
+      SMOLVLA_WARMUP: ${SMOLVLA_WARMUP:-1}
+      SMOLVLA_ACTION_ADAPTER: ${SMOLVLA_ACTION_ADAPTER:-zero}
+      SMOLVLA_ACTION_HORIZON: ${SMOLVLA_ACTION_HORIZON:-8}
+      SMOLVLA_CONTROL_PERIOD_MS: ${SMOLVLA_CONTROL_PERIOD_MS:-100}
+      SMOLVLA_ALLOW_UNTRAINED_ADAPTER: ${SMOLVLA_ALLOW_UNTRAINED_ADAPTER:-0}
+      SMOLVLA_LINEAR_ACTION_INDEX: ${SMOLVLA_LINEAR_ACTION_INDEX:-0}
+      SMOLVLA_ANGULAR_ACTION_INDEX: ${SMOLVLA_ANGULAR_ACTION_INDEX:-1}
+      SMOLVLA_LINEAR_ACTION_SCALE: ${SMOLVLA_LINEAR_ACTION_SCALE:-0.0}
+      SMOLVLA_ANGULAR_ACTION_SCALE: ${SMOLVLA_ANGULAR_ACTION_SCALE:-0.0}
+      SMOLVLA_LINEAR_LIMIT: ${SMOLVLA_LINEAR_LIMIT:-0.2}
+      SMOLVLA_ANGULAR_LIMIT: ${SMOLVLA_ANGULAR_LIMIT:-0.5}
+    volumes:
+      - ${VLA_PROJECT_ROOT}/run/models/smolvla_base:/models/smolvla_base:ro
+      - ${VLA_PROJECT_ROOT}/run/models/huggingface:/models/huggingface:ro
+      - ${VLA_PROJECT_ROOT}/run/policy:/run/vla-policy
+      - ${VLA_PROJECT_ROOT}/run/test/smolvla-demo/images:/test/images:ro
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    healthcheck:
+      test: ["CMD", "python3", "-m", "runtime.healthcheck"]
+      interval: 10s
+      timeout: 2s
+      retries: 3
+      start_period: 120s

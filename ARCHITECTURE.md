@@ -704,8 +704,13 @@ FaultInjectionSafetyRule
 短 Episode 已记录图像、相机信息、Policy 动作、候选/最终控制和系统状态，测试期间最终
 `/cmd_vel` 保持零。模型无关 `vehicle.observation.v1`、C++ Observation Adapter、完整
 Observation 输入的 Policy Gateway、Shadow Comparison 和累计误差指标也已完成端到端
-验证。相机几何标定、真实 SmolVLA Provider、Dataset Exporter 和 Rosbag Replay 尚未
-完成，因此阶段 1 尚未退出。
+验证。
+
+截至 2026-08-06，常驻 SmolVLA Provider 已完成：模型和 VLM 离线加载一次并预热，真实
+前视相机 Observation 通过 Unix Socket 完成连续推理，热推理约 0.92--1.05 秒；推理期间
+健康检查约 0.20 秒返回，并发预测被拒绝而不是排队。默认 Shadow Adapter 仍输出零 Twist，
+最终 `/cmd_vel` 保持零且未启动 `wheeltec_robot_node`。相机几何标定、Dataset Exporter、
+Rosbag Replay、车辆数据微调和有语义的车辆动作适配仍未完成，因此阶段 1 尚未退出。
 
 ### 阶段 2：低速闭环
 

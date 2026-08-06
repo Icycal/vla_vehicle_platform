@@ -75,3 +75,46 @@ and is removed. The validated Orin NX run loaded one real USB camera frame into 
 image inputs and produced an action tensor with shape `(1, 50, 6)` in `2.130` seconds. This test
 proves offline image-to-action inference only; it does not define vehicle action semantics or grant
 the model control authority.
+
+
+## Persistent Provider
+
+The next validation layer is implemented by `runtime.providers.smolvla`. Unlike the one-shot Demo,
+it keeps the model resident, exposes the project Protobuf interface, rejects concurrent inference,
+and reports health while inference is running. The default adapter deliberately returns zero Twist
+candidates because the base checkpoint's six action dimensions are not vehicle controls.
+
+Run:
+
+```bash
+cp config/smolvla-runtime.env.example run/config/smolvla-runtime.env
+./scripts/build_smolvla_runtime.sh
+./scripts/run_smolvla_runtime.sh
+./scripts/test_smolvla_runtime.sh
+```
+
+Passing this smoke test proves persistent image-to-action inference and protocol correlation. It
+does not prove useful Ackermann action quality; that requires the Dataset Exporter, vehicle-specific
+training, Rosbag Replay, and real Shadow evaluation.
+
+
+## Persistent Runtime Validation - 2026-08-06
+
+The persistent runtime passed on the Orin NX with the real model snapshot and the captured USB
+camera frame:
+
+- Provider: `smolvla-runtime`.
+- Model: `smolvla-base-c83c3163`.
+- Default adapter: `smolvla-shadow-zero-v1`.
+- Warm direct inference: approximately `0.924` seconds; round trip approximately `0.991` seconds.
+- Repeated ROS Shadow inference: approximately `0.916` to `1.050` seconds.
+- Health response during active inference: approximately `197` milliseconds.
+- A second overlapping prediction was rejected with `SmolVLA provider is busy`.
+- The response contained eight finite zero Twist candidates correlated to the source Observation.
+- The C++ Gateway continued receiving camera Observations while inference was active.
+- Final `/cmd_vel` remained exactly zero and `wheeltec_robot_node` was not started.
+
+This closes the persistent-provider infrastructure item, but not the Phase 1 model-quality exit
+condition. The base checkpoint remains semantically incompatible with Ackermann control until a
+vehicle Dataset Exporter, vehicle-specific training, Replay validation, and a trained action adapter
+are complete.

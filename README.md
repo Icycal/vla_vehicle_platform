@@ -184,5 +184,18 @@ The one-shot container exits and is removed after inference. Its log remains at
 to the model's three camera inputs only to validate the interface. The raw six-dimensional output
 has no Ackermann control semantics and must never be published directly to `/cmd_vel`.
 
+For repeated Shadow inference, build and start the persistent runtime:
+
+```bash
+cp config/smolvla-runtime.env.example run/config/smolvla-runtime.env
+./scripts/build_smolvla_runtime.sh
+./scripts/run_smolvla_runtime.sh
+./scripts/test_smolvla_runtime.sh
+```
+
+The persistent Provider keeps the model loaded and accepts real Observation requests over the Unix
+Socket. Its default action adapter emits zero Twist candidates even though real model inference is
+executed. See `docs/POLICY_RUNTIME.md` before enabling any explicit Shadow-only affine mapping.
+
 Do not source either legacy workspace before building or running this project. See
 `DEPENDENCIES.md` for source provenance and licensing constraints.

@@ -1,4 +1,5 @@
 import os
+import threading
 import time
 
 from .base import PolicyProvider
@@ -13,6 +14,7 @@ class MockPolicyProvider(PolicyProvider):
         self._linear_velocity = float(os.environ.get("MOCK_LINEAR_VELOCITY", "0.0"))
         self._angular_velocity = float(os.environ.get("MOCK_ANGULAR_VELOCITY", "0.0"))
         self._request_counter = 0
+        self._request_lock = threading.Lock()
 
     @property
     def provider_id(self) -> str:
@@ -33,14 +35,16 @@ class MockPolicyProvider(PolicyProvider):
         if request.valid_until_ns <= time.time_ns():
             raise ValueError("observation expired")
 
-        self._request_counter += 1
+        with self._request_lock:
+            self._request_counter += 1
+            request_number = self._request_counter
         generated_at = time.time_ns()
         response = protocol.PredictResponse(
-            request_id=f"mock-runtime-{self._request_counter}",
+            request_id=f"mock-runtime-{request_number}",
             observation_id=request.observation_id,
             provider_id=self.provider_id,
             model_id=self.model_id,
-            action_schema="vehicle.twist_chunk.v1",
+            action_schema=self.action_schema,
             generated_at_ns=generated_at,
             valid_until_ns=generated_at + self._control_period_ns * self._horizon + 500_000_000,
             control_period_ns=self._control_period_ns,

@@ -12,6 +12,18 @@ class PolicyProvider(ABC):
     def model_id(self) -> str:
         raise NotImplementedError
 
+    @property
+    def observation_schema(self) -> str:
+        return "vehicle.observation.v1"
+
+    @property
+    def action_schema(self) -> str:
+        return "vehicle.twist_chunk.v1"
+
+    @property
+    def status_message(self) -> str:
+        return "Policy runtime ready" if self.ready() else "Policy runtime unavailable"
+
     @abstractmethod
     def ready(self) -> bool:
         raise NotImplementedError
