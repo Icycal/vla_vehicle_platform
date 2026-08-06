@@ -1,0 +1,8 @@
+vla_policy_gateway:
+  ros__parameters:
+    transport: unix_socket
+    socket_path: "/home/wheeltec/vla_vehicle_platform/run/policy/policy.sock"
+    transport_timeout: 10.0
+    prediction_frequency: 0.25
+    observation_timeout: 5.0
+    observation_topic: "/vla/replay/observation"

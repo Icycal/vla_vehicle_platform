@@ -197,5 +197,19 @@ The persistent Provider keeps the model loaded and accepts real Observation requ
 Socket. Its default action adapter emits zero Twist candidates even though real model inference is
 executed. See `docs/POLICY_RUNTIME.md` before enabling any explicit Shadow-only affine mapping.
 
+## Dataset export and replay
+
+Convert a recorded Episode into the model-independent vehicle dataset and safely replay only its
+Observations:
+
+```bash
+./scripts/export_episode.sh datasets/episodes/container-shadow-001
+./scripts/replay_episode.sh datasets/episodes/container-shadow-001 1.0
+```
+
+The exporter uses `observation_id` to join images, state, PolicyAction, and ShadowComparison instead
+of guessing by timestamp. Replay publishes only `/vla/replay/observation` with refreshed IDs and
+validity. See `docs/DATASET_EXPORT_REPLAY.md`.
+
 Do not source either legacy workspace before building or running this project. See
 `DEPENDENCIES.md` for source provenance and licensing constraints.

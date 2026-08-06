@@ -49,7 +49,30 @@ ament_target_dependencies(
   vehicle_interfaces
 )
 
-install(TARGETS observation_monitor episode_recorder shadow_evaluator
+add_executable(dataset_exporter src/dataset_exporter.cpp)
+ament_target_dependencies(
+  dataset_exporter
+  rclcpp
+  rosbag2_cpp
+  rosbag2_storage
+  vehicle_interfaces
+)
+
+add_executable(observation_replay src/observation_replay_node.cpp)
+ament_target_dependencies(
+  observation_replay
+  rclcpp
+  rosbag2_cpp
+  rosbag2_storage
+  vehicle_interfaces
+)
+
+install(TARGETS
+  observation_monitor
+  episode_recorder
+  shadow_evaluator
+  dataset_exporter
+  observation_replay
   DESTINATION lib/${PROJECT_NAME}
 )
 

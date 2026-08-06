@@ -29,6 +29,8 @@ public:
     const std::string socket_path = declare_parameter<std::string>(
       "socket_path", "/run/vla-policy/policy.sock");
     const double transport_timeout = declare_parameter<double>("transport_timeout", 1.0);
+    const std::string observation_topic = declare_parameter<std::string>(
+      "observation_topic", "/vla/observation");
     const int horizon = declare_parameter<int>("action_horizon", 8);
     const int control_period_ms = declare_parameter<int>("control_period_ms", 50);
     const double prediction_frequency = declare_parameter<double>("prediction_frequency", 5.0);
@@ -66,7 +68,7 @@ public:
     subscription_options.callback_group = observation_callback_group_;
     observation_subscription_ =
       create_subscription<vehicle_interfaces::msg::PolicyObservation>(
-      "/vla/observation", rclcpp::QoS(2).reliable(),
+      observation_topic, rclcpp::QoS(2).reliable(),
       [this](vehicle_interfaces::msg::PolicyObservation::SharedPtr message) {
         std::lock_guard<std::mutex> lock(observation_mutex_);
         observation_ = std::move(message);
