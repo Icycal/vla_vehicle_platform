@@ -1,0 +1,19 @@
+<launch>
+  <arg name="camera_params"
+       default="$(find-pkg-share vehicle_bringup)/config/front_camera.yaml"/>
+  <arg name="enable_compressed" default="true"/>
+
+  <node pkg="usb_cam" exec="usb_cam_node_exe"
+        name="front_camera" output="screen">
+    <param from="$(var camera_params)"/>
+    <remap from="image_raw" to="/camera/image_raw"/>
+    <remap from="camera_info" to="/camera/camera_info"/>
+  </node>
+
+  <node if="$(var enable_compressed)"
+        pkg="image_transport" exec="republish"
+        name="front_camera_compressor" args="raw compressed" output="screen">
+    <remap from="in" to="/camera/image_raw"/>
+    <remap from="out/compressed" to="/camera/image_compressed"/>
+  </node>
+</launch>

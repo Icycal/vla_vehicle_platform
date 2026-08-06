@@ -65,6 +65,29 @@ The model-independent Observation contract and current state keys are documented
 `docs/OBSERVATION_CONTRACT.md`. `PolicyAction.observation_id` provides traceability from the input
 image/state/task bundle through prediction and Shadow evaluation.
 
+## Front camera
+
+The project uses the vendored C++ `usb_cam` driver and provides an independent camera Bringup so
+camera publishing can be tested without starting the rest of Phase 1:
+
+```bash
+cd /home/wheeltec/vla_vehicle_platform
+./scripts/build.sh
+./scripts/run_front_camera.sh
+```
+
+In another terminal:
+
+```bash
+./scripts/check_front_camera.sh
+```
+
+The default configuration opens `/dev/video0` as MJPEG at `640x480`, publishes raw images on
+`/camera/image_raw`, camera calibration metadata on `/camera/camera_info`, and JPEG-compressed
+images on `/camera/image_compressed`. `phase1_shadow.launch.xml` includes the same camera launch.
+The current camera-info file remains an uncalibrated placeholder and must not be treated as valid
+geometric calibration.
+
 ## External Policy Runtime
 
 The default remains the in-process C++ Mock transport. To validate the isolated runtime without
