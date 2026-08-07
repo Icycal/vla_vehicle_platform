@@ -1,12 +1,11 @@
-# Dataset Export and Observation Replay
+# Dataset Export, LeRobot Conversion, and Observation Replay
 
 ## Purpose
 
 Phase 1 records a model-independent `vehicle.episode.v1` rosbag2 Episode. Training frameworks
 must not read project bags directly because each VLA implementation has different feature names,
 normalization, and dataset packaging. The first export layer therefore produces a stable vehicle
-intermediate dataset. Model-specific exporters, including a future LeRobot exporter, consume this
-intermediate format.
+intermediate dataset. Model-specific converters consume this intermediate format.
 
 Observation Replay republishes only `vehicle_interfaces/msg/PolicyObservation`. It never replays
 `/cmd_vel`, selected commands, safety events, or chassis traffic.
@@ -53,6 +52,45 @@ By default, Observations without a correlated ShadowComparison are counted but s
 
 The exporter refuses to overwrite an existing output directory. It writes to a sibling `.partial`
 directory and renames it only after all frames, images, and the Manifest are complete.
+
+## Native LeRobot Dataset
+
+Convert one or more `vehicle.dataset.v1` directories into a local LeRobot v3 dataset:
+
+```bash
+./scripts/convert_lerobot_dataset.sh \
+  datasets/lerobot/ackermann-shadow-v1 \
+  datasets/exports/episode-001 \
+  datasets/exports/episode-002
+```
+
+The wrapper runs fully offline in `vla-lerobot-compat:0.4.3`, does not require GPU access, and
+verifies the completed dataset by loading its first and last samples through `LeRobotDataset`.
+Output is written with the calling user's UID and GID. Existing output and `.partial` directories
+are rejected.
+
+The default mapping is `config/lerobot_ackermann_dataset.json`:
+
+- `observation.images.front`: the RGB front camera image;
+- `observation.state`: eight configured vehicle state values;
+- `observation.state_valid`: a float validity mask for those state values;
+- `action`: Ackermann training target `[linear_x, angular_z]` from the executed Shadow Twist;
+- `source.timestamp_ns` and `source.frame_index`: source audit fields;
+- task text: the original frame task stored through LeRobot task indexing.
+
+Invalid state values are filled with the configured value, currently zero, while the validity mask
+preserves whether each value was observed. The mapping is configuration-driven so another camera,
+state vector, action dimension, repository ID, or robot type does not require converter code changes.
+Use `LEROBOT_MAPPING_FILE` to select another tracked or runtime mapping file.
+
+LeRobot datasets require one integer FPS. The converter does not silently resample frames. It checks
+the median source interval against the configured FPS and rejects mismatches outside
+`fps_tolerance_ratio`. The current recorder and default mapping are 5 FPS. Original nanosecond
+timestamps remain available in `source.timestamp_ns` for audit and later explicit resampling.
+
+The generated `vehicle_conversion_manifest.json` records the mapping, feature schema, source Episode
+IDs, measured FPS, and frame counts. The current `container-shadow-001` sample contains all-zero
+executed actions and is only a format/loader validation dataset, not useful vehicle training data.
 
 ## Safe Observation Replay
 
@@ -102,6 +140,8 @@ Stop the runtime after the test:
 
 ## Current Boundary
 
-`vehicle.dataset.v1` is not yet a native LeRobot dataset. A subsequent LeRobot Dataset Exporter
-will map named vehicle states, images, tasks, and Ackermann targets into the exact feature schema of
-a vehicle-trained policy. The base SmolVLA checkpoint remains unsuitable for vehicle control.
+The LeRobot converter establishes packaging and feature contracts; it does not make the base
+SmolVLA checkpoint suitable for Ackermann control. Production training still requires calibrated
+camera data, valid vehicle states, non-zero expert actions, train/validation splits, external GPU
+fine-tuning, and a trained Ackermann Action Adapter. Until those gates pass, SmolVLA remains
+Shadow-only and must not control `/cmd_vel`.

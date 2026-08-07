@@ -1,0 +1,37 @@
+{
+  "schema_version": "vehicle.lerobot.mapping.v1",
+  "repo_id": "wheeltec/ackermann-vehicle",
+  "fps": 5,
+  "fps_tolerance_ratio": 0.2,
+  "robot_type": "ackermann",
+  "use_videos": false,
+  "image_features": [
+    {
+      "source_key": "observation.images.front",
+      "target_key": "observation.images.front"
+    }
+  ],
+  "state_feature": {
+    "target_key": "observation.state",
+    "validity_target_key": "observation.state_valid",
+    "invalid_fill": 0.0,
+    "keys": [
+      "observation.state.linear_velocity",
+      "observation.state.angular_velocity",
+      "observation.state.acceleration_x",
+      "observation.state.acceleration_y",
+      "observation.state.yaw_rate",
+      "observation.state.executed_linear_command",
+      "observation.state.executed_angular_command",
+      "observation.state.battery_voltage"
+    ]
+  },
+  "action_feature": {
+    "target_key": "action",
+    "source": "target.twist",
+    "keys": [
+      "linear_x",
+      "angular_z"
+    ]
+  }
+}

@@ -39,9 +39,10 @@
 - 增加默认零输出与显式仿射两种 Shadow Action Adapter，非 Shadow 模式强制拒绝。
 - Policy Runtime 支持健康检查与长推理并发，C++ Gateway 改为多线程回调避免阻塞相机输入。
 
-- ?? C++ `vehicle.dataset.v1` Episode Exporter?? Observation ID ??????????? Shadow ???
-- ?? C++ Observation Replay?????? Replay ??????? ID???????????
-- Policy Gateway ???? Observation ???????????? Rosbag Replay ???
+- 增加 C++ `vehicle.dataset.v1` Episode Exporter，按 Observation ID 关联图像、状态、PolicyAction 和 ShadowComparison。
+- 增加 C++ Observation Replay，仅向隔离 Replay 话题刷新并发布 Observation。
+- Policy Gateway 支持配置 Observation 输入话题，用于安全 Rosbag Replay。
+- 增加配置驱动的 LeRobot v3 Dataset 转换器、Ackermann 特征映射和容器内加载验证。
 
 ### Validation
 
@@ -51,8 +52,9 @@
 - 常驻 SmolVLA 热推理约 0.92--1.05 秒，推理期间健康检查约 0.20 秒返回。
 - 真实相机到 SmolVLA Provider 的 ROS Shadow 链路通过，最终 `/cmd_vel` 保持零。
 - 重叠预测请求会被拒绝，不会累积过期图像队列。
-- `container-shadow-001` ?? 49 ????? 49 ???????1 ???? Observation ???????
-- ?? Observation ? Replay ???? SmolVLA?PolicyAction ??????? `/cmd_vel` ???
+- `container-shadow-001` 导出 49 个完整训练帧，跳过 1 个未关联的 Observation。
+- 真实 Observation 经 Replay、SmolVLA 和 PolicyAction 的离线链路通过，最终 `/cmd_vel` 保持零。
+- LeRobot 单 Episode 49 帧和双 Episode 98 帧转换、重新加载、FPS 错配拒绝及覆盖拒绝均通过。
 - 关联测试 Episode 记录 35 组 Observation/Prediction/Comparison 和 28 张图像。
 - 测试期间最终 `/cmd_vel` 始终为零，未启动 `wheeltec_robot_node`。
 

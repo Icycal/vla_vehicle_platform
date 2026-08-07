@@ -205,11 +205,16 @@ Observations:
 ```bash
 ./scripts/export_episode.sh datasets/episodes/container-shadow-001
 ./scripts/replay_episode.sh datasets/episodes/container-shadow-001 1.0
+./scripts/convert_lerobot_dataset.sh \
+  datasets/lerobot/ackermann-shadow-v1 \
+  datasets/exports/container-shadow-001
 ```
 
 The exporter uses `observation_id` to join images, state, PolicyAction, and ShadowComparison instead
 of guessing by timestamp. Replay publishes only `/vla/replay/observation` with refreshed IDs and
-validity. See `docs/DATASET_EXPORT_REPLAY.md`.
+validity. The LeRobot converter uses the offline compatibility image, validates source FPS, maps
+front RGB plus vehicle state into LeRobot features, and emits the Ackermann action target
+`[linear_x, angular_z]`. See `docs/DATASET_EXPORT_REPLAY.md`.
 
 Do not source either legacy workspace before building or running this project. See
 `DEPENDENCIES.md` for source provenance and licensing constraints.
