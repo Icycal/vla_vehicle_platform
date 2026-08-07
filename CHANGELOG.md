@@ -43,6 +43,8 @@
 - 增加 C++ Observation Replay，仅向隔离 Replay 话题刷新并发布 Observation。
 - Policy Gateway 支持配置 Observation 输入话题，用于安全 Rosbag Replay。
 - 增加配置驱动的 LeRobot v3 Dataset 转换器、Ackermann 特征映射和容器内加载验证。
+- 增加 Orin Smoke 与 x86 CUDA Fine-tune 双训练 Profile、离线 policy overlay 和训练制品清单。
+- 增加 Jetson PyTorch `torch.distributed` 兼容入口和 x86 SmolVLA 训练镜像定义。
 
 ### Validation
 
@@ -55,6 +57,8 @@
 - `container-shadow-001` 导出 49 个完整训练帧，跳过 1 个未关联的 Observation。
 - 真实 Observation 经 Replay、SmolVLA 和 PolicyAction 的离线链路通过，最终 `/cmd_vel` 保持零。
 - LeRobot 单 Episode 49 帧和双 Episode 98 帧转换、重新加载、FPS 错配拒绝及覆盖拒绝均通过。
+- Orin NX 完成 5-step SmolVLA 真实反向传播：约 100M 可训练参数，后四步约 0.46 秒/step。
+- 训练 Smoke 峰值 RAM 约 7.2GB、GPU 利用率 99%、结温约 49°C、输入功耗约 10.2W。
 - 关联测试 Episode 记录 35 组 Observation/Prediction/Comparison 和 28 张图像。
 - 测试期间最终 `/cmd_vel` 始终为零，未启动 `wheeltec_robot_node`。
 

@@ -717,6 +717,11 @@ Observation 输入的 Policy Gateway、Shadow Comparison 和累计误差指标�
 当前样例仅验证格式和加载链路，真实车辆数据采集、外部 GPU 微调和训练后 Action Adapter
 仍是阶段 1 后续工作。
 
+同日完成 SmolVLA 双训练 Profile：Orin Profile 仅运行 5-step CUDA/反向传播和资源 Smoke，
+x86 CUDA Profile 用于正式 Fine-tune。两者从 Dataset Manifest 动态生成输入输出特征，复用固定
+基础模型和 VLM revision，并生成可审计的训练清单。Orin 实测后四步约 0.46 秒/step、
+峰值 RAM 约 7.2GB；该结果只证明训练接口可运行，不代表适合在车端执行正式训练。
+
 ### 阶段 2：低速闭环
 
 - 接入 Action Executor、Safety Guard 和 Control Mux。

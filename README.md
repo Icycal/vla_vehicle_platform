@@ -216,5 +216,21 @@ validity. The LeRobot converter uses the offline compatibility image, validates 
 front RGB plus vehicle state into LeRobot features, and emits the Ackermann action target
 `[linear_x, angular_z]`. See `docs/DATASET_EXPORT_REPLAY.md`.
 
+## SmolVLA training profiles
+
+Run the five-step Orin CUDA/backward compatibility test:
+
+```bash
+./scripts/run_smolvla_training.sh \
+  training/profiles/orin-smoke.json \
+  datasets/lerobot/smolvla-training-smoke \
+  run/training/orin-smoke-001
+```
+
+The same runner accepts `training/profiles/gpu-finetune.json` on an x86 CUDA workstation. It derives
+policy features from the converted Dataset, resolves the pinned local VLM snapshot, remains offline,
+and writes a reproducible training manifest. The Orin profile is a Smoke Test only and does not save
+a deployable checkpoint. See `training/README.md`.
+
 Do not source either legacy workspace before building or running this project. See
 `DEPENDENCIES.md` for source provenance and licensing constraints.

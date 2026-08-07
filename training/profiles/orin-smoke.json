@@ -1,0 +1,21 @@
+{
+  "schema_version": "vehicle.training.profile.v1",
+  "profile_id": "smolvla-orin-smoke",
+  "platform": "orin",
+  "image": "vla-lerobot-compat:0.4.3",
+  "batch_size": 1,
+  "steps": 5,
+  "num_workers": 0,
+  "eval_freq": 0,
+  "log_freq": 1,
+  "save_checkpoint": false,
+  "save_freq": 5,
+  "seed": 1000,
+  "use_amp": true,
+  "resize_imgs_with_padding": [256, 256],
+  "freeze_vision_encoder": true,
+  "train_expert_only": true,
+  "train_state_proj": true,
+  "image_transforms": false,
+  "monitor_tegrastats": true
+}
