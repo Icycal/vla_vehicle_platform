@@ -216,6 +216,29 @@ validity. The LeRobot converter uses the offline compatibility image, validates 
 front RGB plus vehicle state into LeRobot features, and emits the Ackermann action target
 `[linear_x, angular_z]`. See `docs/DATASET_EXPORT_REPLAY.md`.
 
+Inspect data before training and create deterministic Episode-level splits before converting each
+split separately:
+
+```bash
+./scripts/inspect_dataset.sh \
+  datasets/exports/episode-001 \
+  run/test/dataset-quality/episode-001
+./scripts/split_vehicle_dataset.sh \
+  datasets/splits/ackermann-v1.json \
+  datasets/exports/episode-001 \
+  datasets/exports/episode-002 \
+  datasets/exports/episode-003
+./scripts/convert_lerobot_split.sh \
+  datasets/splits/ackermann-v1.json \
+  train \
+  datasets/lerobot/ackermann-train-v1
+```
+
+The split manifest preserves whole Episodes, source hashes, relative paths, and task/frame
+statistics. The current all-zero-action Smoke Dataset intentionally reports
+`training_readiness=false`; it validates interfaces but is not training data. See
+`docs/DATASET_QUALITY.md`.
+
 ## SmolVLA training profiles
 
 Run the five-step Orin CUDA/backward compatibility test:

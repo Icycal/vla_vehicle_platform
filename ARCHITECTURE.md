@@ -722,6 +722,12 @@ x86 CUDA Profile 用于正式 Fine-tune。两者从 Dataset Manifest 动态生�
 基础模型和 VLM revision，并生成可审计的训练清单。Orin 实测后四步约 0.46 秒/step、
 峰值 RAM 约 7.2GB；该结果只证明训练接口可运行，不代表适合在车端执行正式训练。
 
+
+数据进入正式训练前增加两道独立门禁：Dataset Inspector 对车辆中间格式和 LeRobot v3
+检查图像、时间、状态有效性、动作分布及训练就绪状态；Episode Splitter 在模型格式转换前
+按完整 Episode 确定性划分 train/validation/test，并记录源 Manifest 与帧文件 Hash。禁止按帧
+随机划分。当前全零动作 Smoke Dataset 明确标记为 `training_readiness=false`，只保留为接口回归样例。
+
 ### 阶段 2：低速闭环
 
 - 接入 Action Executor、Safety Guard 和 Control Mux。
