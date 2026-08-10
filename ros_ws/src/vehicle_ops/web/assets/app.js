@@ -29,6 +29,11 @@ function freshness(item) {
   if (!item?.received) return "OFFLINE";
   return item.fresh ? "ONLINE" : "STALE";
 }
+function setView(name) {
+  document.querySelectorAll(".view-panel").forEach((panel) => panel.classList.toggle("active", panel.id === `view-${name}`));
+  document.querySelectorAll("[data-view]").forEach((button) => button.classList.toggle("active", button.dataset.view === name));
+  history.replaceState(null, "", `#${name}`);
+}
 function badge(node, healthy, yes, no) {
   node.className = `pill ${healthy ? "success" : "warning"}`;
   node.innerHTML = `<i></i>${healthy ? yes : no}`;
@@ -36,6 +41,9 @@ function badge(node, healthy, yes, no) {
   badge($("connectionBadge"), true, "API ONLINE", "连接中");
   text("modeName", data.system?.mode_name || "NO STATE");
   text("systemMessage", data.system?.message || "尚未收到 Supervisor 状态");
+  text("detailSupervisor", data.system?.mode_name ? `${data.system.mode_name} · ${data.system.control_source || "--"}` : "OFFLINE");
+  text("detailObservation", data.observation?.ready ? "READY" : freshness(data.observation));
+  text("detailPolicy", data.policy?.state_name || freshness(data.policy));
   $("modeOrb").classList.toggle("danger", ["SAFE_STOP", "FAULT"].includes(data.system?.mode_name));
   text("observationState", data.observation?.ready ? "READY" : freshness(data.observation));
   text("observationMeta", data.observation?.message || "等待 Observation Monitor");
@@ -102,6 +110,8 @@ $("safeStop").addEventListener("click", async () => {
   try { const result = await post("/api/safe-stop", `vehicle_ops_console\u001f${$("safeReason").value}`); toast(result.message); refresh(); }
   catch (error) { toast(error.message, true); }
 });
+document.querySelectorAll("[data-view]").forEach((button) => button.addEventListener("click", () => setView(button.dataset.view)));
+document.querySelectorAll("[data-open-view]").forEach((button) => button.addEventListener("click", () => setView(button.dataset.openView)));
 $("tokenButton").addEventListener("click", openToken);
 $("tokenClose").addEventListener("click", closeToken);
 $("panelBackdrop").addEventListener("click", closeToken);
@@ -109,7 +119,8 @@ $("saveToken").addEventListener("click", () => {
   state.token = $("tokenInput").value.trim();
   sessionStorage.setItem("vehicleOpsToken", state.token);
   closeToken(); toast("操作令牌已保存到当前浏览器会话");
-});function updateCommand() {
+});
+function updateCommand() {
   const input = $("datasetInput").value.trim();
   const output = $("datasetOutput").value.trim();
   const tool = $("datasetTool").value;
@@ -125,5 +136,6 @@ $("copyCommand").addEventListener("click", async () => {
   catch { toast("浏览器禁止剪贴板访问，请手动复制", true); }
 });
 updateCommand();
+setView(["monitor", "capture", "tools"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "monitor");
 refresh();
 setInterval(refresh, 1000);

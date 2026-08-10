@@ -65,6 +65,7 @@
 - 车辆格式与 LeRobot 格式质量报告一致识别全零动作、状态无效和 Episode 不足，训练就绪均为 false。
 - Episode Split 相同种子字节一致，不同种子改变分配，重复 Episode ID 被拒绝且 Split 间无泄漏。
 - Vehicle Ops 静态页面、HTTP 状态接口和白名单写操作在 Orin NX 上完成构建与访问验证。
+- Vehicle Ops 重构为实时监控、数据采集和工程工具三视图，桌面与手机浏览器均无横向溢出。
 - 训练 Smoke 峰值 RAM 约 7.2GB、GPU 利用率 99%、结温约 49°C、输入功耗约 10.2W。
 - 关联测试 Episode 记录 35 组 Observation/Prediction/Comparison 和 28 张图像。
 - 测试期间最终 `/cmd_vel` 始终为零，未启动 `wheeltec_robot_node`。

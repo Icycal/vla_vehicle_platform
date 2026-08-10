@@ -60,6 +60,14 @@ http://10.101.70.232:8088
 
 ## 页面功能
 
+控制台将功能拆分为三个顶部视图，避免所有表单和状态堆叠在同一长页面：
+
+- **实时监控**：控制模式、四项核心状态、前视相机、链路健康和 Shadow 指标；
+- **数据采集**：Episode Start/Stop、任务文本和 Safe Stop；
+- **工程工具**：Dataset Inspector、Episode Split 和 LeRobot Convert 命令生成器。
+
+切换视图不会启动或停止任何 ROS 节点，也不会丢失当前浏览器会话中的 Operator Token。
+
 ### 总览
 
 页面每秒刷新一次，显示：
@@ -82,7 +90,9 @@ API 保存最近一帧 `/camera/image_compressed`，浏览器定期请求：
 /api/camera/front.jpg
 ```
 
-这不是额外的视频编码服务，不会复制完整视频流，只用于内部状态确认。没有相机 Topic 时页面保持占位状态。### Episode
+这不是额外的视频编码服务，不会复制完整视频流，只用于内部状态确认。没有相机 Topic 时页面保持占位状态。
+
+### Episode
 
 填写可选 Episode ID、任务描述和操作员后点击“开始记录”。页面调用：
 
