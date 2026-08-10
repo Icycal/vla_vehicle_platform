@@ -1,5 +1,5 @@
 const $ = (id) => document.getElementById(id);
-const state = { token: sessionStorage.getItem("vehicleOpsToken") || "", cameraTick: 0, selectedJobId: "", jobs: [], debugRunId: "", debugResult: null, debugImageUrls: {}, pipelineTrace: null, pipelineHistory: [], selectedPipelineStageId: "", selectedPipelineHistoryId: "", inspectorMode: "live" };
+const state = { token: sessionStorage.getItem("vehicleOpsToken") || "", cameraSequence: 0, pipelineCameraSequence: 0, cameraStatus: null, pipelineCameraActive: false, selectedJobId: "", jobs: [], debugRunId: "", debugResult: null, debugImageUrls: {}, pipelineTrace: null, pipelineHistory: [], selectedPipelineStageId: "", selectedPipelineHistoryId: "", inspectorMode: "live" };
 const text = (id, value) => { $(id).textContent = value ?? "—"; };
 const number = (value, digits = 1) => Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : "--";
 function toast(message, error = false) {
@@ -37,7 +37,31 @@ function setView(name) {
 function badge(node, healthy, yes, no) {
   node.className = `pill ${healthy ? "success" : "warning"}`;
   node.innerHTML = `<i></i>${healthy ? yes : no}`;
-}function render(data) {
+}
+function frameTime(value) {
+  if (!Number.isFinite(Number(value)) || Number(value) <= 0) return "--:--:--.---";
+  return new Date(Number(value)).toLocaleTimeString("zh-CN", {
+    hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit", fractionalSecondDigits: 3
+  });
+}
+function renderCameraView(camera, ids, sequenceKey, enabled = true) {
+  const received = Boolean(camera?.received && enabled);
+  $(ids.overlay).classList.toggle("visible", received);
+  $(ids.overlay).classList.toggle("stale", received && !camera?.fresh);
+  text(ids.label, camera?.fresh ? "实时快照" : "最后快照");
+  $(ids.image).style.display = received ? "block" : "none";
+  $(ids.empty).style.display = received ? "none" : "grid";
+  const sequence = Number(camera?.frame_sequence || 0);
+  if (!received || sequence <= 0 || sequence === state[sequenceKey]) return;
+  state[sequenceKey] = sequence;
+  $(ids.image).src = `/api/camera/front.jpg?t=${sequence}`;
+  text(ids.time, frameTime(camera.frame_received_at_ms));
+  text(ids.sequence, `帧 #${sequence}`);
+  $(ids.overlay).classList.remove("updated");
+  void $(ids.overlay).offsetWidth;
+  $(ids.overlay).classList.add("updated");
+}
+function render(data) {
   badge($("connectionBadge"), true, "API ONLINE", "连接中");
   text("modeName", data.system?.mode_name || "NO STATE");
   text("systemMessage", data.system?.message || "尚未收到 Supervisor 状态");
@@ -58,15 +82,17 @@ function badge(node, healthy, yes, no) {
   text("cameraResolution", `${data.observation?.image_width || "--"} × ${data.observation?.image_height || "--"}`);
   text("cameraAge", data.camera?.age_ms >= 0 ? `更新 ${number(data.camera.age_ms / 1000, 1)}s 前` : "更新时间 --");
   text("calibrationState", data.observation?.camera_calibrated ? "已标定" : "未标定");
-  badge($("cameraBadge"), Boolean(data.camera?.fresh), "实时", "无画面");
-  if (data.camera?.received) {
-    $("cameraImage").style.display = "block";
-    $("cameraEmpty").style.display = "none";
-    if (++state.cameraTick % 2 === 0) $("cameraImage").src = `/api/camera/front.jpg?t=${Date.now()}`;
-  } else {
-    $("cameraImage").style.display = "none";
-    $("cameraEmpty").style.display = "grid";
-  }
+  const cameraReceived = Boolean(data.camera?.received);
+  state.cameraStatus = data.camera || null;
+  badge($("cameraBadge"), Boolean(data.camera?.fresh), "实时快照", cameraReceived ? "画面停滞" : "无画面");
+  renderCameraView(data.camera, {
+    image: "cameraImage", empty: "cameraEmpty", overlay: "cameraLiveOverlay",
+    label: "cameraLiveLabel", time: "cameraFrameTime", sequence: "cameraFrameSequence"
+  }, "cameraSequence");
+  renderCameraView(data.camera, {
+    image: "pipelineLiveImage", empty: "pipelineLiveEmpty", overlay: "pipelineCameraLiveOverlay",
+    label: "pipelineCameraLiveLabel", time: "pipelineCameraFrameTime", sequence: "pipelineCameraFrameSequence"
+  }, "pipelineCameraSequence", state.pipelineCameraActive);
   const recording = data.episode?.state_name === "RECORDING";
   $("recordDot").classList.toggle("active", recording);
   text("currentEpisode", data.episode?.episode_id || "—");
@@ -383,14 +409,11 @@ function renderPipelineTrace(trace) {
   text("pipelineSafetySummary", safety ? `${pipelineStatusName(safety.status).zh} · ${pipelineStageDescription(safety)}` : "等待安全防护结果");
   text("pipelineShadowSummary", shadow ? `${pipelineStatusName(shadow.status).zh} · ${shadow.output_summary}` : "等待影子评估结果");
   const camera = stageById(trace, "sensor_capture");
-  if (camera && ["LIVE", "READY"].includes(camera.status)) {
-    $("pipelineLiveImage").style.display = "block";
-    $("pipelineLiveEmpty").style.display = "none";
-    $("pipelineLiveImage").src = `/api/camera/front.jpg?t=${Date.now()}`;
-  } else {
-    $("pipelineLiveImage").style.display = "none";
-    $("pipelineLiveEmpty").style.display = "grid";
-  }
+  state.pipelineCameraActive = Boolean(camera && ["LIVE", "READY"].includes(camera.status));
+  renderCameraView(state.cameraStatus, {
+    image: "pipelineLiveImage", empty: "pipelineLiveEmpty", overlay: "pipelineCameraLiveOverlay",
+    label: "pipelineCameraLiveLabel", time: "pipelineCameraFrameTime", sequence: "pipelineCameraFrameSequence"
+  }, "pipelineCameraSequence", state.pipelineCameraActive);
 }
 async function refreshPipeline(showError = false) {
   try {

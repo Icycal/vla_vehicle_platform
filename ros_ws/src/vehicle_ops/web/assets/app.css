@@ -60,6 +60,18 @@ main{width:min(1340px,93vw);margin:auto;padding:20px 0 24px}
 .camera-reticle:before,.camera-reticle:after{content:"";position:absolute;background:rgba(53,215,243,.25)}
 .camera-reticle:before{left:50%;top:-14px;width:1px;height:28px}
 .camera-reticle:after{top:50%;left:-14px;height:1px;width:28px}
+.camera-live-overlay{position:absolute;left:12px;bottom:12px;display:none;grid-template-columns:auto auto;grid-template-areas:"label time" "label sequence";align-items:center;column-gap:12px;padding:8px 11px;border:1px solid rgba(137,190,213,.24);border-radius:9px;background:rgba(3,11,18,.78);box-shadow:0 7px 20px rgba(0,0,0,.28);backdrop-filter:blur(8px);pointer-events:none}
+.camera-live-overlay.visible{display:grid}
+.camera-live-label{grid-area:label;display:flex;align-items:center;gap:7px;color:#dff8ff;font-size:10px;font-weight:700;line-height:1.05}
+.camera-live-label>i{width:7px;height:7px;border-radius:50%;background:var(--lime);box-shadow:0 0 9px rgba(169,236,69,.75)}
+.camera-live-label b{font:inherit}
+.camera-live-label small{display:block;margin-top:3px;color:#6f91a7;font-size:7px;font-weight:600;letter-spacing:.1em}
+.camera-live-overlay.stale .camera-live-label>i{background:#f4b942;box-shadow:0 0 8px rgba(244,185,66,.5)}
+.camera-live-overlay.stale .camera-live-label b{color:#ffd88b}
+.camera-live-overlay strong{grid-area:time;color:#fff;font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace;font-size:12px;font-variant-numeric:tabular-nums;letter-spacing:.02em}
+.camera-live-overlay>small{grid-area:sequence;color:#7f9bae;font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace;font-size:8px;text-align:right}
+.camera-live-overlay.updated .camera-live-label>i{animation:camera-frame-pulse .42s ease-out}
+@keyframes camera-frame-pulse{50%{transform:scale(1.8);box-shadow:0 0 15px rgba(169,236,69,.95)}}
 .camera-footer{display:flex;gap:22px;color:var(--muted);font-size:10px;padding-top:11px}
 .live-summary{display:flex;flex-direction:column}
 .live-dot,.record-dot{width:9px;height:9px;border-radius:50%;background:#42586c}
@@ -155,7 +167,10 @@ footer{flex-direction:column;gap:6px}
 .mode-card{align-items:flex-start}
 .orb{width:18px;height:18px}
 .overview-copy>p:last-child{line-height:1.5}
+.camera-live-overlay{left:8px;bottom:8px;column-gap:8px;padding:7px 9px}
+.camera-live-overlay strong{font-size:11px}
 }
+@media(prefers-reduced-motion:reduce){.camera-live-overlay.updated .camera-live-label>i{animation:none}}
 
 /* Controlled Job Center */
 .job-center-grid{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(320px,.75fr);gap:14px;align-items:start}

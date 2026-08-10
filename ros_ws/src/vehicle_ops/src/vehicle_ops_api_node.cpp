@@ -25,6 +25,7 @@
 #include <cctype>
 #include <cerrno>
 #include <cstring>
+#include <cstdint>
 #include <deque>
 #include <filesystem>
 #include <fstream>
@@ -276,6 +277,8 @@ private:
   std::chrono::steady_clock::time_point pipeline_received_{};
   std::vector<uint8_t> camera_data_;
   std::chrono::steady_clock::time_point camera_time_{};
+  std::chrono::system_clock::time_point camera_wall_time_{};
+  std::uint64_t camera_sequence_{0};
   rclcpp::Subscription<vehicle_interfaces::msg::SystemState>::SharedPtr system_sub_;
   rclcpp::Subscription<vehicle_interfaces::msg::ObservationStatus>::SharedPtr observation_sub_;
   rclcpp::Subscription<vehicle_interfaces::msg::EpisodeState>::SharedPtr episode_sub_;
@@ -336,6 +339,8 @@ VehicleOpsApi::VehicleOpsApi() : Node("vehicle_ops_api")
       std::lock_guard<std::mutex> lock(mutex_);
       camera_data_ = message->data;
       camera_time_ = std::chrono::steady_clock::now();
+      camera_wall_time_ = std::chrono::system_clock::now();
+      ++camera_sequence_;
     });
   task_pub_ = create_publisher<std_msgs::msg::String>("/vla/task", 10);
   start_client_ = create_client<vehicle_interfaces::srv::StartEpisode>("/vehicle/start_episode");
@@ -726,6 +731,9 @@ std::string VehicleOpsApi::status_json()
   const auto safety_age = age(safety_, now);
   const auto camera_age = camera_data_.empty() ? -1.0 :
     std::chrono::duration<double, std::milli>(now - camera_time_).count();
+  const auto camera_received_at_ms = camera_data_.empty() ? 0LL :
+    std::chrono::duration_cast<std::chrono::milliseconds>(
+    camera_wall_time_.time_since_epoch()).count();
   std::ostringstream out;
   out << std::fixed << std::setprecision(2);
   out << "{\"schema_version\":\"vehicle.ops.status.v1\",";
@@ -792,7 +800,9 @@ std::string VehicleOpsApi::status_json()
   }
   out << "},\"camera\":{\"received\":" << (!camera_data_.empty() ? "true" : "false") <<
     ",\"fresh\":" << (fresh(camera_age) ? "true" : "false") <<
-    ",\"age_ms\":" << camera_age << ",\"bytes\":" << camera_data_.size() << "}}\n";
+    ",\"age_ms\":" << camera_age << ",\"bytes\":" << camera_data_.size() <<
+    ",\"frame_received_at_ms\":" << camera_received_at_ms <<
+    ",\"frame_sequence\":" << camera_sequence_ << "}}\n";
   return out.str();
 }
 int main(int argc, char ** argv)
