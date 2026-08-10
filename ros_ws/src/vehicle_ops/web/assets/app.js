@@ -1,5 +1,5 @@
 const $ = (id) => document.getElementById(id);
-const state = { token: sessionStorage.getItem("vehicleOpsToken") || "", cameraTick: 0 };
+const state = { token: sessionStorage.getItem("vehicleOpsToken") || "", cameraTick: 0, selectedJobId: "", jobs: [] };
 const text = (id, value) => { $(id).textContent = value ?? "—"; };
 const number = (value, digits = 1) => Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : "--";
 function toast(message, error = false) {
@@ -120,22 +120,144 @@ $("saveToken").addEventListener("click", () => {
   sessionStorage.setItem("vehicleOpsToken", state.token);
   closeToken(); toast("操作令牌已保存到当前浏览器会话");
 });
+function commandFor(type, input, output) {
+  if (type === "dataset.inspect") return `./scripts/inspect_dataset.sh \
+  ${input} \
+  ${output}`;
+  if (type === "dataset.split") return `./scripts/split_vehicle_dataset.sh \
+  ${output} \
+  ${input}`;
+  if (type === "dataset.convert_lerobot") return `./scripts/convert_lerobot_dataset.sh \
+  ${output} \
+  ${input}`;
+  return "";
+}
 function updateCommand() {
-  const input = $("datasetInput").value.trim();
-  const output = $("datasetOutput").value.trim();
-  const tool = $("datasetTool").value;
-  let command = "";
-  if (tool === "inspect") command = `./scripts/inspect_dataset.sh \\\n  ${input} \\\n  ${output}`;
-  if (tool === "split") command = `./scripts/split_vehicle_dataset.sh \\\n  ${output} \\\n  ${input}`;
-  if (tool === "convert") command = `./scripts/convert_lerobot_dataset.sh \\\n  ${output} \\\n  ${input}`;
-  $("generatedCommand").textContent = command;
+  $("generatedCommand").textContent = commandFor(
+    $("datasetTool").value, $("datasetInput").value.trim(), $("datasetOutput").value.trim());
+}
+async function jobFetch(path, options = {}) {
+  if (!state.token) throw new Error("请先填写操作令牌");
+  const response = await fetch(path, {
+    cache: "no-store",
+    ...options,
+    headers: { "X-Ops-Token": state.token, ...(options.headers || {}) }
+  });
+  const contentType = response.headers.get("content-type") || "";
+  const result = contentType.includes("application/json") ? await response.json() : await response.text();
+  if (!response.ok) throw new Error(result.message || `HTTP ${response.status}`);
+  return result;
+}
+function stateLabel(value) {
+  return ({ queued: "排队", running: "运行中", succeeded: "成功", failed: "失败", cancelled: "已取消" })[value] || value;
+}
+function renderJobList() {
+  const list = $("jobList");
+  list.replaceChildren();
+  if (!state.jobs.length) {
+    const empty = document.createElement("div");
+    empty.className = "job-empty";
+    empty.innerHTML = "<strong>暂无任务</strong><span>从左侧执行一个白名单任务</span>";
+    list.appendChild(empty);
+    return;
+  }
+  state.jobs.forEach((job) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `job-row${state.selectedJobId === job.id ? " active" : ""}`;
+    const copy = document.createElement("div");
+    const title = document.createElement("strong");
+    const meta = document.createElement("span");
+    const status = document.createElement("b");
+    title.textContent = job.job_type;
+    meta.textContent = `${job.id} · ${job.requested_at || "--"}`;
+    status.className = `job-state ${job.state}`;
+    status.textContent = stateLabel(job.state);
+    copy.append(title, meta);
+    button.append(copy, status);
+    button.addEventListener("click", () => selectJob(job.id));
+    list.appendChild(button);
+  });
+}
+async function refreshJobs(showError = false) {
+  if (!state.token) {
+    $("jobApiBadge").className = "pill neutral";
+    $("jobApiBadge").innerHTML = "<i></i>需要令牌";
+    return;
+  }
+  try {
+    const result = await jobFetch("/api/jobs");
+    state.jobs = result.jobs || [];
+    $("jobApiBadge").className = "pill success";
+    $("jobApiBadge").innerHTML = "<i></i>JOB API ONLINE";
+    renderJobList();
+    if (state.selectedJobId) await refreshSelectedJob();
+  } catch (error) {
+    $("jobApiBadge").className = "pill warning";
+    $("jobApiBadge").innerHTML = "<i></i>JOB API ERROR";
+    if (showError) toast(error.message, true);
+  }
+}
+async function selectJob(jobId) {
+  state.selectedJobId = jobId;
+  renderJobList();
+  await refreshSelectedJob(true);
+}
+async function refreshSelectedJob(showError = false) {
+  if (!state.selectedJobId || !state.token) return;
+  try {
+    const [job, log] = await Promise.all([
+      jobFetch(`/api/jobs/${encodeURIComponent(state.selectedJobId)}`),
+      jobFetch(`/api/jobs/${encodeURIComponent(state.selectedJobId)}/log`)
+    ]);
+    $("selectedJobTitle").textContent = job.job_type;
+    $("selectedJobState").className = `job-state ${job.state}`;
+    $("selectedJobState").textContent = stateLabel(job.state);
+    $("jobLog").textContent = log || "任务尚未产生输出。";
+    $("cancelJob").disabled = !["queued", "running"].includes(job.state);
+  } catch (error) {
+    if (showError) toast(error.message, true);
+  }
+}
+async function createJob(jobType, parameters = {}) {
+  const job = await jobFetch("/api/jobs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ job_type: jobType, parameters })
+  });
+  state.selectedJobId = job.id;
+  toast(`任务已提交：${job.job_type}`);
+  await refreshJobs(true);
 }
 ["datasetInput", "datasetOutput", "datasetTool"].forEach((id) => $(id).addEventListener("input", updateCommand));
 $("copyCommand").addEventListener("click", async () => {
   try { await navigator.clipboard.writeText($("generatedCommand").textContent); toast("命令已复制"); }
   catch { toast("浏览器禁止剪贴板访问，请手动复制", true); }
 });
+$("jobForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  try {
+    await createJob($("datasetTool").value, {
+      dataset: $("datasetInput").value.trim(), output: $("datasetOutput").value.trim()
+    });
+  } catch (error) { toast(error.message, true); if (!state.token) openToken(); }
+});
+document.querySelectorAll("[data-policy-job]").forEach((button) => button.addEventListener("click", async () => {
+  try { await createJob(button.dataset.policyJob); }
+  catch (error) { toast(error.message, true); if (!state.token) openToken(); }
+}));
+$("refreshJobs").addEventListener("click", () => refreshJobs(true));
+$("cancelJob").addEventListener("click", async () => {
+  if (!state.selectedJobId || !confirm("确认取消当前任务？正在运行的子进程组将收到 SIGTERM。")) return;
+  try {
+    await jobFetch(`/api/jobs/${encodeURIComponent(state.selectedJobId)}/cancel`, { method: "POST" });
+    toast("已提交取消请求");
+    await refreshJobs(true);
+  } catch (error) { toast(error.message, true); }
+});
 updateCommand();
 setView(["monitor", "capture", "tools"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "monitor");
 refresh();
+refreshJobs();
 setInterval(refresh, 1000);
+setInterval(() => refreshJobs(), 2000);

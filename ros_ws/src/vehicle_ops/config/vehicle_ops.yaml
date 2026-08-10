@@ -6,3 +6,5 @@ vehicle_ops_api:
     service_timeout_seconds: 2.0
     stale_after_seconds: 3.0
     operator_token: ""
+    project_root: /home/wheeltec/vla_vehicle_platform
+    jobs_root: /home/wheeltec/vla_vehicle_platform/run/ops/jobs

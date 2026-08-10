@@ -156,3 +156,35 @@ footer{flex-direction:column;gap:6px}
 .orb{width:46px;height:46px}
 .overview-copy>p:last-child{line-height:1.5}
 }
+
+/* Controlled Job Center */
+.job-center-grid{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(320px,.75fr);gap:14px;align-items:start}
+.job-launcher,.job-history,.job-console,.job-boundary{padding:20px}
+.job-intro{margin:10px 0 16px;color:var(--muted);font-size:11px;line-height:1.65}
+.job-form{display:grid;grid-template-columns:.72fr 1fr 1fr;gap:10px;align-items:end}
+.job-form .button-row{grid-column:1/-1;grid-template-columns:1fr auto}
+.command-preview{margin-top:12px;padding:12px 14px;border:1px solid #1a3043;border-radius:11px;background:#04101a}
+.command-preview small{display:block;color:#60798e;font-size:9px;margin-bottom:6px;text-transform:uppercase;letter-spacing:.1em}
+.command-preview pre{margin:0;min-height:42px;white-space:pre-wrap;word-break:break-all;color:#9ce9f7;font-size:10px;line-height:1.55}
+.policy-actions{display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:center;margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}
+.policy-actions strong,.policy-actions span{display:block}
+.policy-actions strong{font-size:11px}.policy-actions span{font-size:9px;color:var(--muted);margin-top:3px}
+.icon-button.compact{width:30px;height:30px;font-size:16px}
+.job-list{display:grid;gap:7px;margin-top:14px;max-height:360px;overflow:auto;padding-right:3px}
+.job-row{width:100%;display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px solid var(--line);border-radius:10px;background:#091725;color:var(--text);padding:10px;text-align:left;cursor:pointer;transition:border-color .16s,background .16s}
+.job-row:hover,.job-row.active{border-color:#2d6478;background:#0d2030}
+.job-row div{min-width:0}.job-row strong,.job-row span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.job-row strong{font-size:10px}.job-row span{margin-top:4px;color:var(--muted);font-size:8px}
+.job-state{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;border:1px solid #29445b;border-radius:999px;padding:4px 7px;color:var(--muted);font-size:8px;text-transform:uppercase;letter-spacing:.05em}
+.job-state.queued,.job-state.running{border-color:#725d2a;color:#f5ca69}.job-state.succeeded{border-color:#275b4b;color:#67d9ad}.job-state.failed{border-color:#6e3040;color:#ff9bac}.job-state.cancelled{border-color:#4b5060;color:#aab5c3}
+.job-empty{display:grid;place-items:center;min-height:160px;border:1px dashed #29445b;border-radius:11px;text-align:center;color:var(--muted)}
+.job-empty strong,.job-empty span{display:block}.job-empty strong{font-size:11px;color:var(--text)}.job-empty span{margin-top:6px;font-size:9px}
+.job-console{grid-column:1/2}
+.job-console-actions{display:flex;align-items:center;gap:8px}
+.button.compact-button{margin:0;padding:6px 9px;font-size:9px}
+.button:disabled{cursor:not-allowed;opacity:.38;transform:none;filter:none}
+.job-console pre{height:250px;margin:14px 0 0;padding:14px;border:1px solid #1a3043;border-radius:11px;background:#030b12;color:#a9c6d8;overflow:auto;white-space:pre-wrap;word-break:break-word;font:10px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace}
+.job-boundary{grid-column:2/3;grid-row:2/3}
+@media(max-width:1050px){.job-center-grid{grid-template-columns:1fr}.job-console,.job-boundary{grid-column:auto;grid-row:auto}.job-form{grid-template-columns:1fr 1fr}.job-form label:first-child{grid-column:1/-1}}
+@media(max-width:680px){.job-launcher,.job-history,.job-console,.job-boundary{padding:16px}.job-form{grid-template-columns:1fr}.job-form label:first-child{grid-column:auto}.policy-actions{grid-template-columns:1fr}.job-console .section-heading{align-items:flex-start}.job-console-actions{align-items:flex-end;flex-direction:column}.job-console pre{height:220px}}
+@media(prefers-reduced-motion:reduce){.job-row{transition:none}}

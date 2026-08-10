@@ -7,7 +7,7 @@ Vehicle Ops Console 是新工程内独立实现的内部运维调试工具，不
 - C++17 ROS 2 节点 `vehicle_ops_api`：订阅统一状态 Topic，调用白名单 Service，并提供轻量 HTTP API；
 - 完全离线的响应式 Web 页面：不依赖 npm、CDN、rosbridge 或宿主机 Python Web 环境。
 
-浏览器不直接连接 ROS 2，不访问底盘串口，也不能发布最终 `/cmd_vel`。当前版本只允许任务文本、Episode Start/Stop 和 Safe Stop 四类写操作。
+浏览器不直接连接 ROS 2，不访问底盘串口，也不能发布最终 `/cmd_vel`。当前版本允许任务文本、Episode Start/Stop、Safe Stop，以及严格白名单化的工程 Job。它不提供任意 Shell、Topic 或 Service 入口。
 
 ## 构建
 
@@ -64,7 +64,7 @@ http://10.101.70.232:8088
 
 - **实时监控**：控制模式、四项核心状态、前视相机、链路健康和 Shadow 指标；
 - **数据采集**：Episode Start/Stop、任务文本和 Safe Stop；
-- **工程工具**：Dataset Inspector、Episode Split 和 LeRobot Convert 命令生成器。
+- **工程工具**：受控任务中心、最近任务历史、日志查看、任务取消和调试命令预览。
 
 切换视图不会启动或停止任何 ROS 节点，也不会丢失当前浏览器会话中的 Operator Token。
 
@@ -132,6 +132,7 @@ API 保存最近一帧 `/camera/image_compressed`，浏览器定期请求：
 VEHICLE_OPS_BIND_ADDRESS=0.0.0.0
 VEHICLE_OPS_PORT=8088
 VEHICLE_OPS_OPERATOR_TOKEN=<random-token>
+VEHICLE_OPS_JOBS_ROOT=/home/wheeltec/vla_vehicle_platform/run/ops/jobs
 ```
 
 修改端口或 Token 后重新启动控制台。示例文件为 `config/vehicle_ops.env.example`，示例不包含真实凭据。
@@ -160,8 +161,13 @@ ssh -L 8088:127.0.0.1:8088 wheeltec@10.101.70.232
 | POST | `/api/episode/start` | 是 | 调用 Episode Start Service |
 | POST | `/api/episode/stop` | 是 | 调用 Episode Stop Service |
 | POST | `/api/safe-stop` | 是 | 请求 Supervisor Safe Stop |
+| POST | `/api/jobs` | 是 | 提交白名单工程任务 |
+| GET | `/api/jobs` | 是 | 查询最近任务 |
+| GET | `/api/jobs/<job-id>` | 是 | 查询任务状态 |
+| GET | `/api/jobs/<job-id>/log` | 是 | 获取有界日志尾部 |
+| POST | `/api/jobs/<job-id>/cancel` | 是 | 取消运行中的任务 |
 
-写请求必须携带 `X-Ops-Token`。API 不提供任意 Topic 发布、任意 Service 调用、任意文件读取或 Shell 执行能力。
+Job API 的读写请求和其他写请求必须携带 `X-Ops-Token`。API 不提供任意 Topic 发布、任意 Service 调用、任意文件读取或 Shell 执行能力。
 
 ## 安全限制
 

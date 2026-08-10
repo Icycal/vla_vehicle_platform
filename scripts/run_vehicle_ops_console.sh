@@ -17,6 +17,7 @@ if [[ ! -f "${RUNTIME_CONFIG}" ]]; then
 VEHICLE_OPS_BIND_ADDRESS=0.0.0.0
 VEHICLE_OPS_PORT=8088
 VEHICLE_OPS_OPERATOR_TOKEN=${generated_token}
+VEHICLE_OPS_JOBS_ROOT=${PROJECT_ROOT}/run/ops/jobs
 EOF
   chmod 600 "${RUNTIME_CONFIG}"
   echo "Created runtime configuration: ${RUNTIME_CONFIG}"
@@ -29,6 +30,7 @@ set +a
 : "${VEHICLE_OPS_BIND_ADDRESS:=0.0.0.0}"
 : "${VEHICLE_OPS_PORT:=8088}"
 : "${VEHICLE_OPS_OPERATOR_TOKEN:?VEHICLE_OPS_OPERATOR_TOKEN is required}"
+: "${VEHICLE_OPS_JOBS_ROOT:=${PROJECT_ROOT}/run/ops/jobs}"
 
 declare -A seen_ips=()
 vehicle_ips=()
@@ -52,4 +54,6 @@ exec ros2 launch vehicle_ops vehicle_ops.launch.xml \
   bind_address:="${VEHICLE_OPS_BIND_ADDRESS}" \
   port:="${VEHICLE_OPS_PORT}" \
   operator_token:="${VEHICLE_OPS_OPERATOR_TOKEN}" \
+  project_root:="${PROJECT_ROOT}" \
+  jobs_root:="${VEHICLE_OPS_JOBS_ROOT}" \
   "$@"

@@ -14,6 +14,7 @@
 #include <vehicle_interfaces/srv/request_safe_stop.hpp>
 #include <vehicle_interfaces/srv/start_episode.hpp>
 #include <vehicle_interfaces/srv/stop_episode.hpp>
+#include "job_manager.hpp"
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -92,10 +93,12 @@ std::string status_text(int status)
 {
   switch (status) {
     case 200: return "OK";
+    case 202: return "Accepted";
     case 400: return "Bad Request";
     case 401: return "Unauthorized";
     case 404: return "Not Found";
     case 405: return "Method Not Allowed";
+    case 409: return "Conflict";
     case 408: return "Request Timeout";
     case 413: return "Payload Too Large";
     case 503: return "Service Unavailable";
@@ -203,14 +206,21 @@ private:
   HttpResponse start_episode(const std::string & body);
   HttpResponse stop_episode();
   HttpResponse safe_stop(const std::string & body);
+  HttpResponse jobs_create(const std::string & body);
+  HttpResponse jobs_list();
+  HttpResponse job_get(const std::string & job_id);
+  HttpResponse job_log(const std::string & job_id);
+  HttpResponse job_cancel(const std::string & job_id);
   std::string status_json();
   static HttpResponse success(const std::string & message, const std::string & extra = "");
-  static HttpResponse error(int status, const std::string & message);  std::string bind_, token_, web_root_;
+  static HttpResponse error(int status, const std::string & message);
+  std::string bind_, token_, web_root_, project_root_, jobs_root_;
   int port_{8088}, limit_{1048576};
   double service_seconds_{2.0}, stale_seconds_{3.0};
   std::atomic<bool> running_{false};
   int server_{-1};
   std::thread thread_;
+  std::unique_ptr<vehicle_ops::JobManager> jobs_;
   std::mutex mutex_;
   Timed<vehicle_interfaces::msg::SystemState> system_;
   Timed<vehicle_interfaces::msg::ObservationStatus> observation_;
@@ -241,6 +251,8 @@ VehicleOpsApi::VehicleOpsApi() : Node("vehicle_ops_api")
   stale_seconds_ = declare_parameter<double>("stale_after_seconds", 3.0);
   token_ = declare_parameter<std::string>("operator_token", "");
   web_root_ = declare_parameter<std::string>("web_root", "");
+  project_root_ = declare_parameter<std::string>("project_root", "/home/wheeltec/vla_vehicle_platform");
+  jobs_root_ = declare_parameter<std::string>("jobs_root", project_root_ + "/run/ops/jobs");
   if (port_ < 1 || port_ > 65535 || !std::filesystem::is_directory(web_root_)) {
     throw std::invalid_argument("Invalid port or web_root");
   }
@@ -267,6 +279,7 @@ VehicleOpsApi::VehicleOpsApi() : Node("vehicle_ops_api")
   start_client_ = create_client<vehicle_interfaces::srv::StartEpisode>("/vehicle/start_episode");
   stop_client_ = create_client<vehicle_interfaces::srv::StopEpisode>("/vehicle/stop_episode");
   safe_client_ = create_client<vehicle_interfaces::srv::RequestSafeStop>("/vehicle/request_safe_stop");
+  jobs_ = std::make_unique<vehicle_ops::JobManager>(project_root_, jobs_root_);
   start_server();
   RCLCPP_INFO(get_logger(), "Vehicle Ops listening on http://%s:%d", bind_.c_str(), port_);
 }
@@ -380,6 +393,21 @@ HttpResponse VehicleOpsApi::route(const HttpRequest & request)
     return {200, "application/json; charset=utf-8", status_json(), {{"Cache-Control", "no-store"}}};
   }
   if (request.method == "GET" && path == "/api/camera/front.jpg") {return camera();}
+  if (path == "/api/jobs" || path.rfind("/api/jobs/", 0) == 0) {
+    const auto denied = authorize(request);
+    if (denied) {return *denied;}
+    if (request.method == "POST" && path == "/api/jobs") {return jobs_create(request.body);}
+    if (request.method == "GET" && path == "/api/jobs") {return jobs_list();}
+    const std::string prefix = "/api/jobs/";
+    const auto remainder = path.substr(prefix.size());
+    const auto separator = remainder.find('/');
+    const auto job_id = remainder.substr(0, separator);
+    const auto action = separator == std::string::npos ? "" : remainder.substr(separator + 1);
+    if (request.method == "GET" && action.empty()) {return job_get(job_id);}
+    if (request.method == "GET" && action == "log") {return job_log(job_id);}
+    if (request.method == "POST" && action == "cancel") {return job_cancel(job_id);}
+    return error(405, "Unsupported job endpoint");
+  }
   if (request.method == "POST") {
     const auto denied = authorize(request);
     if (denied) {return *denied;}
@@ -473,6 +501,42 @@ HttpResponse VehicleOpsApi::safe_stop(const std::string & body)
   }
   const auto response = future.get();
   return response->accepted ? success(response->message) : error(400, response->message);
+}
+HttpResponse VehicleOpsApi::jobs_create(const std::string & body)
+{
+  try {
+    return {202, "application/json; charset=utf-8", jobs_->create(body), {{"Cache-Control", "no-store"}}};
+  } catch (const std::invalid_argument & error_value) {
+    return error(400, error_value.what());
+  } catch (const std::runtime_error & error_value) {
+    return error(409, error_value.what());
+  }
+}
+HttpResponse VehicleOpsApi::jobs_list()
+{
+  return {200, "application/json; charset=utf-8", jobs_->list(), {{"Cache-Control", "no-store"}}};
+}
+HttpResponse VehicleOpsApi::job_get(const std::string & job_id)
+{
+  const auto job = jobs_->get(job_id);
+  return job ? HttpResponse{200, "application/json; charset=utf-8", *job, {{"Cache-Control", "no-store"}}} :
+    error(404, "Job not found");
+}
+HttpResponse VehicleOpsApi::job_log(const std::string & job_id)
+{
+  const auto log_value = jobs_->log(job_id);
+  return log_value ? HttpResponse{200, "text/plain; charset=utf-8", *log_value, {{"Cache-Control", "no-store"}}} :
+    error(404, "Job not found");
+}
+HttpResponse VehicleOpsApi::job_cancel(const std::string & job_id)
+{
+  try {
+    const auto job = jobs_->cancel(job_id);
+    return job ? HttpResponse{200, "application/json; charset=utf-8", *job, {{"Cache-Control", "no-store"}}} :
+      error(404, "Job not found");
+  } catch (const std::runtime_error & error_value) {
+    return error(409, error_value.what());
+  }
 }
 HttpResponse VehicleOpsApi::success(const std::string & message, const std::string & extra)
 {
