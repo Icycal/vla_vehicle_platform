@@ -197,6 +197,21 @@ The persistent Provider keeps the model loaded and accepts real Observation requ
 Socket. Its default action adapter emits zero Twist candidates even though real model inference is
 executed. See `docs/POLICY_RUNTIME.md` before enabling any explicit Shadow-only affine mapping.
 
+## Vehicle Ops Console
+
+Build and start the independent internal operations console:
+
+```bash
+./scripts/build.sh
+./scripts/run_vehicle_ops_console.sh
+```
+
+The first run creates a random operator token under `run/config/vehicle_ops.env` and prints the LAN
+URL. The offline responsive UI aggregates Supervisor, Observation, camera, Policy, Episode, Shadow,
+Safety, and Orin host status. Token-protected write operations are restricted to task publication,
+Episode Start/Stop, and Supervisor Safe Stop. It never publishes `/cmd_vel`, accesses the chassis
+serial port, or executes arbitrary shell commands. See `docs/VEHICLE_OPS_CONSOLE.md`.
+
 ## Dataset export and replay
 
 Convert a recorded Episode into the model-independent vehicle dataset and safely replay only its

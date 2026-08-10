@@ -1,0 +1,13 @@
+<launch>
+  <arg name="bind_address" default="0.0.0.0"/>
+  <arg name="port" default="8088"/>
+  <arg name="operator_token" default=""/>
+
+  <node pkg="vehicle_ops" exec="vehicle_ops_api" name="vehicle_ops_api" output="screen">
+    <param from="$(find-pkg-share vehicle_ops)/config/vehicle_ops.yaml"/>
+    <param name="bind_address" value="$(var bind_address)"/>
+    <param name="port" value="$(var port)"/>
+    <param name="operator_token" value="$(var operator_token)"/>
+    <param name="web_root" value="$(find-pkg-share vehicle_ops)/web"/>
+  </node>
+</launch>

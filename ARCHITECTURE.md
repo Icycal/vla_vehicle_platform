@@ -728,6 +728,14 @@ x86 CUDA Profile 用于正式 Fine-tune。两者从 Dataset Manifest 动态生�
 按完整 Episode 确定性划分 train/validation/test，并记录源 Manifest 与帧文件 Hash。禁止按帧
 随机划分。当前全零动作 Smoke Dataset 明确标记为 `training_readiness=false`，只保留为接口回归样例。
 
+### 阶段 1A：内部运维控制台（提前实施）
+
+为降低 Phase 1 的实车开发和数据操作成本，先于完整用户界面实现独立 `vehicle_ops_console`。
+C++ ROS 2 API 只聚合稳定 Topic 并调用白名单 Service，浏览器通过 HTTP 访问，不直接连接 ROS、
+底盘串口或 Policy Provider 私有接口。第一版覆盖状态、相机、Episode、任务、Shadow 指标和
+Safe Stop；数据工具只生成受控命令，不开放任意 Shell。完整手机 App、Control Lease 和云端认证
+仍保留在阶段 3--4。
+
 ### 阶段 2：低速闭环
 
 - 接入 Action Executor、Safety Guard 和 Control Mux。

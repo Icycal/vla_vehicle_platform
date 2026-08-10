@@ -1,0 +1,587 @@
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#include <rclcpp/rclcpp.hpp>
+#include <sensor_msgs/msg/compressed_image.hpp>
+#include <std_msgs/msg/string.hpp>
+#include <vehicle_interfaces/msg/episode_state.hpp>
+#include <vehicle_interfaces/msg/observation_status.hpp>
+#include <vehicle_interfaces/msg/policy_status.hpp>
+#include <vehicle_interfaces/msg/safety_event.hpp>
+#include <vehicle_interfaces/msg/shadow_metrics.hpp>
+#include <vehicle_interfaces/msg/system_state.hpp>
+#include <vehicle_interfaces/srv/request_safe_stop.hpp>
+#include <vehicle_interfaces/srv/start_episode.hpp>
+#include <vehicle_interfaces/srv/stop_episode.hpp>
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <cctype>
+#include <cerrno>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <future>
+#include <iomanip>
+#include <iostream>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <thread>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+using namespace std::chrono_literals;
+namespace {
+struct HttpRequest {
+  std::string method;
+  std::string target;
+  std::unordered_map<std::string, std::string> headers;
+  std::string body;
+};
+struct HttpResponse {
+  int status{200};
+  std::string content_type{"application/json; charset=utf-8"};
+  std::string body;
+  std::vector<std::pair<std::string, std::string>> headers;
+};
+std::string lowercase(std::string value)
+{
+  std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+    return static_cast<char>(std::tolower(c));
+  });
+  return value;
+}
+std::string trim(const std::string & value)
+{
+  const auto first = value.find_first_not_of(" \t\r\n");
+  if (first == std::string::npos) {return {};}
+  const auto last = value.find_last_not_of(" \t\r\n");
+  return value.substr(first, last - first + 1);
+}
+std::string json_escape(const std::string & value)
+{
+  std::ostringstream output;
+  for (unsigned char c : value) {
+    switch (c) {
+      case '"': output << "\\\""; break;
+      case '\\': output << "\\\\"; break;
+      case '\n': output << "\\n"; break;
+      case '\r': output << "\\r"; break;
+      case '\t': output << "\\t"; break;
+      default: output << c;
+    }
+  }
+  return output.str();
+}
+std::string json_string(const std::string & value) {return "\"" + json_escape(value) + "\"";}
+std::vector<std::string> split_lines(const std::string & body)
+{
+  std::vector<std::string> values;
+  std::istringstream stream(body);
+  std::string field;
+  while (std::getline(stream, field, static_cast<char>(0x1f))) {values.push_back(trim(field));}
+  return values;
+}
+std::string status_text(int status)
+{
+  switch (status) {
+    case 200: return "OK";
+    case 400: return "Bad Request";
+    case 401: return "Unauthorized";
+    case 404: return "Not Found";
+    case 405: return "Method Not Allowed";
+    case 408: return "Request Timeout";
+    case 413: return "Payload Too Large";
+    case 503: return "Service Unavailable";
+    default: return "Error";
+  }
+}
+std::string read_file(const std::filesystem::path & path)
+{
+  std::ifstream stream(path, std::ios::binary);
+  if (!stream) {throw std::runtime_error("Unable to read " + path.string());}
+  std::ostringstream contents;
+  contents << stream.rdbuf();
+  return contents.str();
+}
+std::string content_type_for(const std::filesystem::path & path)
+{
+  const auto extension = lowercase(path.extension().string());
+  if (extension == ".html") {return "text/html; charset=utf-8";}
+  if (extension == ".css") {return "text/css; charset=utf-8";}
+  if (extension == ".js") {return "application/javascript; charset=utf-8";}
+  if (extension == ".svg") {return "image/svg+xml";}
+  return "application/octet-stream";
+}
+std::string mode_name(uint8_t mode)
+{
+  using M = vehicle_interfaces::msg::SystemState;
+  switch (mode) {
+    case M::MODE_MANUAL: return "MANUAL";
+    case M::MODE_NAV2: return "NAV2";
+    case M::MODE_VLA_SHADOW: return "VLA_SHADOW";
+    case M::MODE_SAFE_STOP: return "SAFE_STOP";
+    case M::MODE_FAULT: return "FAULT";
+    default: return "OTHER";
+  }
+}
+std::string episode_name(uint8_t state)
+{
+  using M = vehicle_interfaces::msg::EpisodeState;
+  switch (state) {
+    case M::STATE_IDLE: return "IDLE";
+    case M::STATE_RECORDING: return "RECORDING";
+    case M::STATE_FINALIZING: return "FINALIZING";
+    case M::STATE_ERROR: return "ERROR";
+    default: return "UNKNOWN";
+  }
+}
+std::string policy_name(uint8_t state)
+{
+  using M = vehicle_interfaces::msg::PolicyStatus;
+  switch (state) {
+    case M::STATE_DISCONNECTED: return "DISCONNECTED";
+    case M::STATE_LOADING: return "LOADING";
+    case M::STATE_READY: return "READY";
+    case M::STATE_ERROR: return "ERROR";
+    default: return "UNKNOWN";
+  }
+}
+struct HostMetrics {double load{0.0}; double total{0.0}; double available{0.0}; double uptime{0.0};};
+HostMetrics host_metrics()
+{
+  HostMetrics metrics;
+  std::ifstream("/proc/loadavg") >> metrics.load;
+  std::ifstream("/proc/uptime") >> metrics.uptime;
+  std::ifstream stream("/proc/meminfo");
+  std::string key, unit;
+  double value = 0.0;
+  while (stream >> key >> value >> unit) {
+    if (key == "MemTotal:") {metrics.total = value / 1024.0;}
+    if (key == "MemAvailable:") {metrics.available = value / 1024.0;}
+  }
+  return metrics;
+}
+}  // namespace
+
+class VehicleOpsApi final : public rclcpp::Node
+{
+public:
+  VehicleOpsApi();
+  ~VehicleOpsApi() override;
+private:
+  template<typename T> struct Timed {
+    std::optional<T> message;
+    std::chrono::steady_clock::time_point received{};
+  };
+  template<typename T> void update(Timed<T> & target, const T & message) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    target.message = message;
+    target.received = std::chrono::steady_clock::now();
+  }
+  template<typename T> double age(const Timed<T> & value, std::chrono::steady_clock::time_point now) const {
+    if (!value.message) {return -1.0;}
+    return std::chrono::duration<double, std::milli>(now - value.received).count();
+  }
+  bool fresh(double value) const {return value >= 0.0 && value <= stale_seconds_ * 1000.0;}
+  void start_server();
+  void server_loop();
+  HttpRequest read_request(int client) const;
+  void send_response(int client, const HttpResponse & response) const;
+  static void send_all(int client, const std::string & data);
+  HttpResponse route(const HttpRequest & request);
+  std::optional<HttpResponse> authorize(const HttpRequest & request) const;
+  HttpResponse static_file(const std::string & path) const;
+  HttpResponse camera();
+  HttpResponse task(const std::string & body);
+  HttpResponse start_episode(const std::string & body);
+  HttpResponse stop_episode();
+  HttpResponse safe_stop(const std::string & body);
+  std::string status_json();
+  static HttpResponse success(const std::string & message, const std::string & extra = "");
+  static HttpResponse error(int status, const std::string & message);  std::string bind_, token_, web_root_;
+  int port_{8088}, limit_{1048576};
+  double service_seconds_{2.0}, stale_seconds_{3.0};
+  std::atomic<bool> running_{false};
+  int server_{-1};
+  std::thread thread_;
+  std::mutex mutex_;
+  Timed<vehicle_interfaces::msg::SystemState> system_;
+  Timed<vehicle_interfaces::msg::ObservationStatus> observation_;
+  Timed<vehicle_interfaces::msg::EpisodeState> episode_;
+  Timed<vehicle_interfaces::msg::PolicyStatus> policy_;
+  Timed<vehicle_interfaces::msg::ShadowMetrics> shadow_;
+  Timed<vehicle_interfaces::msg::SafetyEvent> safety_;
+  std::vector<uint8_t> camera_data_;
+  std::chrono::steady_clock::time_point camera_time_{};
+  rclcpp::Subscription<vehicle_interfaces::msg::SystemState>::SharedPtr system_sub_;
+  rclcpp::Subscription<vehicle_interfaces::msg::ObservationStatus>::SharedPtr observation_sub_;
+  rclcpp::Subscription<vehicle_interfaces::msg::EpisodeState>::SharedPtr episode_sub_;
+  rclcpp::Subscription<vehicle_interfaces::msg::PolicyStatus>::SharedPtr policy_sub_;
+  rclcpp::Subscription<vehicle_interfaces::msg::ShadowMetrics>::SharedPtr shadow_sub_;
+  rclcpp::Subscription<vehicle_interfaces::msg::SafetyEvent>::SharedPtr safety_sub_;
+  rclcpp::Subscription<sensor_msgs::msg::CompressedImage>::SharedPtr camera_sub_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr task_pub_;
+  rclcpp::Client<vehicle_interfaces::srv::StartEpisode>::SharedPtr start_client_;
+  rclcpp::Client<vehicle_interfaces::srv::StopEpisode>::SharedPtr stop_client_;
+  rclcpp::Client<vehicle_interfaces::srv::RequestSafeStop>::SharedPtr safe_client_;
+};
+VehicleOpsApi::VehicleOpsApi() : Node("vehicle_ops_api")
+{
+  bind_ = declare_parameter<std::string>("bind_address", "0.0.0.0");
+  port_ = declare_parameter<int>("port", 8088);
+  limit_ = declare_parameter<int>("request_limit_bytes", 1048576);
+  service_seconds_ = declare_parameter<double>("service_timeout_seconds", 2.0);
+  stale_seconds_ = declare_parameter<double>("stale_after_seconds", 3.0);
+  token_ = declare_parameter<std::string>("operator_token", "");
+  web_root_ = declare_parameter<std::string>("web_root", "");
+  if (port_ < 1 || port_ > 65535 || !std::filesystem::is_directory(web_root_)) {
+    throw std::invalid_argument("Invalid port or web_root");
+  }
+  const auto state_qos = rclcpp::QoS(1).reliable().transient_local();
+  system_sub_ = create_subscription<vehicle_interfaces::msg::SystemState>(
+    "/vehicle/system_state", state_qos, [this](vehicle_interfaces::msg::SystemState::SharedPtr message) {update(system_, *message);});
+  observation_sub_ = create_subscription<vehicle_interfaces::msg::ObservationStatus>(
+    "/vehicle/observation_status", state_qos, [this](vehicle_interfaces::msg::ObservationStatus::SharedPtr message) {update(observation_, *message);});
+  episode_sub_ = create_subscription<vehicle_interfaces::msg::EpisodeState>(
+    "/vehicle/episode_state", state_qos, [this](vehicle_interfaces::msg::EpisodeState::SharedPtr message) {update(episode_, *message);});
+  policy_sub_ = create_subscription<vehicle_interfaces::msg::PolicyStatus>(
+    "/vla/policy_state", state_qos, [this](vehicle_interfaces::msg::PolicyStatus::SharedPtr message) {update(policy_, *message);});
+  shadow_sub_ = create_subscription<vehicle_interfaces::msg::ShadowMetrics>(
+    "/vla/shadow_metrics", state_qos, [this](vehicle_interfaces::msg::ShadowMetrics::SharedPtr message) {update(shadow_, *message);});
+  safety_sub_ = create_subscription<vehicle_interfaces::msg::SafetyEvent>(
+    "/vla/safety_event", 10, [this](vehicle_interfaces::msg::SafetyEvent::SharedPtr message) {update(safety_, *message);});
+  camera_sub_ = create_subscription<sensor_msgs::msg::CompressedImage>(
+    "/camera/image_compressed", rclcpp::SensorDataQoS(), [this](sensor_msgs::msg::CompressedImage::SharedPtr message) {
+      std::lock_guard<std::mutex> lock(mutex_);
+      camera_data_ = message->data;
+      camera_time_ = std::chrono::steady_clock::now();
+    });
+  task_pub_ = create_publisher<std_msgs::msg::String>("/vla/task", 10);
+  start_client_ = create_client<vehicle_interfaces::srv::StartEpisode>("/vehicle/start_episode");
+  stop_client_ = create_client<vehicle_interfaces::srv::StopEpisode>("/vehicle/stop_episode");
+  safe_client_ = create_client<vehicle_interfaces::srv::RequestSafeStop>("/vehicle/request_safe_stop");
+  start_server();
+  RCLCPP_INFO(get_logger(), "Vehicle Ops listening on http://%s:%d", bind_.c_str(), port_);
+}
+VehicleOpsApi::~VehicleOpsApi()
+{
+  running_ = false;
+  if (server_ >= 0) {::shutdown(server_, SHUT_RDWR); ::close(server_);}
+  if (thread_.joinable()) {thread_.join();}
+}
+
+void VehicleOpsApi::start_server()
+{
+  server_ = ::socket(AF_INET, SOCK_STREAM, 0);
+  if (server_ < 0) {throw std::runtime_error("socket failed");}
+  int reuse = 1;
+  ::setsockopt(server_, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+  sockaddr_in address{};
+  address.sin_family = AF_INET;
+  address.sin_port = htons(static_cast<uint16_t>(port_));
+  if (::inet_pton(AF_INET, bind_.c_str(), &address.sin_addr) != 1 ||
+    ::bind(server_, reinterpret_cast<sockaddr *>(&address), sizeof(address)) != 0 ||
+    ::listen(server_, 16) != 0)
+  {
+    const auto message = std::string(std::strerror(errno));
+    ::close(server_);
+    server_ = -1;
+    throw std::runtime_error("HTTP server setup failed: " + message);
+  }
+  running_ = true;
+  thread_ = std::thread([this]() {server_loop();});
+}
+void VehicleOpsApi::server_loop()
+{
+  while (running_) {
+    const int client = ::accept(server_, nullptr, nullptr);
+    if (client < 0) {continue;}
+    timeval timeout{5, 0};
+    ::setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+    try {send_response(client, route(read_request(client)));}
+    catch (const std::length_error & e) {send_response(client, error(413, e.what()));}
+    catch (const std::exception & e) {send_response(client, error(400, e.what()));}
+    ::shutdown(client, SHUT_RDWR);
+    ::close(client);
+  }
+}
+HttpRequest VehicleOpsApi::read_request(int client) const
+{
+  std::string data;
+  char buffer[4096];
+  std::size_t header_end = std::string::npos;
+  while ((header_end = data.find("\r\n\r\n")) == std::string::npos) {
+    const auto count = ::recv(client, buffer, sizeof(buffer), 0);
+    if (count <= 0) {throw std::runtime_error("Incomplete request");}
+    data.append(buffer, static_cast<std::size_t>(count));
+    if (data.size() > static_cast<std::size_t>(limit_)) {throw std::length_error("Request too large");}
+  }
+  HttpRequest request;
+  std::istringstream headers(data.substr(0, header_end));
+  std::string line, version;
+  std::getline(headers, line);
+  std::istringstream first(trim(line));
+  first >> request.method >> request.target >> version;
+  if (version.rfind("HTTP/", 0) != 0) {throw std::runtime_error("Invalid request line");}
+  while (std::getline(headers, line)) {
+    const auto separator = line.find(':');
+    if (separator != std::string::npos) {
+      request.headers[lowercase(trim(line.substr(0, separator)))] = trim(line.substr(separator + 1));
+    }
+  }
+  std::size_t length = 0;
+  const auto found = request.headers.find("content-length");
+  if (found != request.headers.end()) {length = static_cast<std::size_t>(std::stoul(found->second));}
+  if (length > static_cast<std::size_t>(limit_)) {throw std::length_error("Body too large");}
+  const auto body_offset = header_end + 4;
+  while (data.size() - body_offset < length) {
+    const auto count = ::recv(client, buffer, sizeof(buffer), 0);
+    if (count <= 0) {throw std::runtime_error("Incomplete body");}
+    data.append(buffer, static_cast<std::size_t>(count));
+  }
+  request.body = data.substr(body_offset, length);
+  return request;
+}
+void VehicleOpsApi::send_all(int client, const std::string & data)
+{
+  std::size_t sent = 0;
+  while (sent < data.size()) {
+    const auto count = ::send(client, data.data() + sent, data.size() - sent, MSG_NOSIGNAL);
+    if (count <= 0) {return;}
+    sent += static_cast<std::size_t>(count);
+  }
+}
+void VehicleOpsApi::send_response(int client, const HttpResponse & response) const
+{
+  std::ostringstream headers;
+  headers << "HTTP/1.1 " << response.status << ' ' << status_text(response.status) << "\r\n";
+  headers << "Content-Type: " << response.content_type << "\r\n";
+  headers << "Content-Length: " << response.body.size() << "\r\n";
+  headers << "Connection: close\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\n";
+  headers << "Content-Security-Policy: default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; object-src 'none'; base-uri 'none'\r\n";
+  for (const auto & item : response.headers) {headers << item.first << ": " << item.second << "\r\n";}
+  headers << "\r\n";
+  send_all(client, headers.str());
+  send_all(client, response.body);
+}
+
+HttpResponse VehicleOpsApi::route(const HttpRequest & request)
+{
+  const auto query = request.target.find('?');
+  const auto path = request.target.substr(0, query);
+  if (request.method == "GET" && path == "/api/status") {
+    return {200, "application/json; charset=utf-8", status_json(), {{"Cache-Control", "no-store"}}};
+  }
+  if (request.method == "GET" && path == "/api/camera/front.jpg") {return camera();}
+  if (request.method == "POST") {
+    const auto denied = authorize(request);
+    if (denied) {return *denied;}
+    if (path == "/api/task") {return task(request.body);}
+    if (path == "/api/episode/start") {return start_episode(request.body);}
+    if (path == "/api/episode/stop") {return stop_episode();}
+    if (path == "/api/safe-stop") {return safe_stop(request.body);}
+  }
+  if (request.method == "GET") {return static_file(path);}
+  return error(405, "Unsupported endpoint");
+}
+std::optional<HttpResponse> VehicleOpsApi::authorize(const HttpRequest & request) const
+{
+  if (token_.empty()) {return error(503, "Write operations are disabled");}
+  const auto found = request.headers.find("x-ops-token");
+  if (found == request.headers.end() || found->second != token_) {
+    return error(401, "A valid operator token is required");
+  }
+  return std::nullopt;
+}
+HttpResponse VehicleOpsApi::static_file(const std::string & path) const
+{
+  std::filesystem::path relative;
+  if (path == "/" || path == "/index.html") {relative = "index.html";}
+  else if (path == "/assets/app.css") {relative = "assets/app.css";}
+  else if (path == "/assets/app.js") {relative = "assets/app.js";}
+  else if (path == "/favicon.svg") {relative = "favicon.svg";}
+  else {return error(404, "Resource not found");}
+  try {
+    const auto file = std::filesystem::path(web_root_) / relative;
+    return {200, content_type_for(file), read_file(file), {{"Cache-Control", "no-cache"}}};
+  } catch (const std::exception &) {return error(404, "Resource not found");}
+}
+HttpResponse VehicleOpsApi::camera()
+{
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (camera_data_.empty()) {return error(404, "No camera frame received");}
+  return {200, "image/jpeg", std::string(camera_data_.begin(), camera_data_.end()), {{"Cache-Control", "no-store"}}};
+}
+
+HttpResponse VehicleOpsApi::task(const std::string & body)
+{
+  const auto value = trim(body);
+  if (value.empty()) {return error(400, "Task text is required");}
+  std_msgs::msg::String message;
+  message.data = value;
+  task_pub_->publish(message);
+  return success("Task published", "\"task\":" + json_string(value));
+}
+HttpResponse VehicleOpsApi::start_episode(const std::string & body)
+{
+  if (!start_client_->wait_for_service(250ms)) {return error(503, "Episode Recorder is unavailable");}
+  const auto fields = split_lines(body);
+  auto request = std::make_shared<vehicle_interfaces::srv::StartEpisode::Request>();
+  request->episode_id = fields.size() > 0 ? fields[0] : "";
+  request->task = fields.size() > 1 ? fields[1] : "";
+  request->operator_id = fields.size() > 2 && !fields[2].empty() ? fields[2] : "vehicle_ops_console";
+  auto future = start_client_->async_send_request(request);
+  if (future.wait_for(std::chrono::milliseconds(static_cast<int>(service_seconds_ * 1000))) != std::future_status::ready) {
+    return error(408, "Episode start timed out");
+  }
+  const auto response = future.get();
+  if (!response->accepted) {return error(400, response->message);}
+  const auto extra = "\"episode_id\":" + json_string(response->resolved_episode_id) +
+    ",\"directory\":" + json_string(response->directory);
+  return success(response->message, extra);
+}
+HttpResponse VehicleOpsApi::stop_episode()
+{
+  if (!stop_client_->wait_for_service(250ms)) {return error(503, "Episode Recorder is unavailable");}
+  auto future = stop_client_->async_send_request(
+    std::make_shared<vehicle_interfaces::srv::StopEpisode::Request>());
+  if (future.wait_for(std::chrono::milliseconds(static_cast<int>(service_seconds_ * 1000))) != std::future_status::ready) {
+    return error(408, "Episode stop timed out");
+  }
+  const auto response = future.get();
+  if (!response->accepted) {return error(400, response->message);}
+  return success(response->message, "\"directory\":" + json_string(response->directory));
+}
+
+HttpResponse VehicleOpsApi::safe_stop(const std::string & body)
+{
+  if (!safe_client_->wait_for_service(250ms)) {return error(503, "Vehicle Supervisor is unavailable");}
+  const auto fields = split_lines(body);
+  auto request = std::make_shared<vehicle_interfaces::srv::RequestSafeStop::Request>();
+  request->requester = fields.size() > 0 && !fields[0].empty() ? fields[0] : "vehicle_ops_console";
+  request->reason = fields.size() > 1 && !fields[1].empty() ? fields[1] : "Ops Console safe stop";
+  auto future = safe_client_->async_send_request(request);
+  if (future.wait_for(std::chrono::milliseconds(static_cast<int>(service_seconds_ * 1000))) != std::future_status::ready) {
+    return error(408, "Safe stop timed out");
+  }
+  const auto response = future.get();
+  return response->accepted ? success(response->message) : error(400, response->message);
+}
+HttpResponse VehicleOpsApi::success(const std::string & message, const std::string & extra)
+{
+  std::string body = "{\"success\":true,\"message\":" + json_string(message);
+  if (!extra.empty()) {body += "," + extra;}
+  body += "}\n";
+  return {200, "application/json; charset=utf-8", body, {{"Cache-Control", "no-store"}}};
+}
+HttpResponse VehicleOpsApi::error(int status, const std::string & message)
+{
+  return {status, "application/json; charset=utf-8",
+    "{\"success\":false,\"message\":" + json_string(message) + "}\n",
+    {{"Cache-Control", "no-store"}}};
+}
+std::string VehicleOpsApi::status_json()
+{
+  const auto host = host_metrics();
+  const auto now = std::chrono::steady_clock::now();
+  std::lock_guard<std::mutex> lock(mutex_);
+  const auto system_age = age(system_, now);
+  const auto observation_age = age(observation_, now);
+  const auto episode_age = age(episode_, now);
+  const auto policy_age = age(policy_, now);
+  const auto shadow_age = age(shadow_, now);
+  const auto safety_age = age(safety_, now);
+  const auto camera_age = camera_data_.empty() ? -1.0 :
+    std::chrono::duration<double, std::milli>(now - camera_time_).count();
+  std::ostringstream out;
+  out << std::fixed << std::setprecision(2);
+  out << "{\"schema_version\":\"vehicle.ops.status.v1\",";
+  out << "\"server\":{\"write_enabled\":" << (!token_.empty() ? "true" : "false") << "},";
+  out << "\"host\":{\"load_one\":" << host.load << ",\"memory_total_mb\":" << host.total <<
+    ",\"memory_available_mb\":" << host.available << ",\"uptime_seconds\":" << host.uptime << "},";  out << "\"system\":{\"received\":" << (system_.message ? "true" : "false") <<
+    ",\"fresh\":" << (fresh(system_age) ? "true" : "false") << ",\"age_ms\":" << system_age;
+  if (system_.message) {
+    const auto & m = *system_.message;
+    out << ",\"mode_name\":" << json_string(mode_name(m.mode)) <<
+      ",\"control_source\":" << json_string(m.control_source) <<
+      ",\"active_policy_id\":" << json_string(m.active_policy_id) <<
+      ",\"safe_to_move\":" << (m.safe_to_move ? "true" : "false") <<
+      ",\"message\":" << json_string(m.status_message);
+  }
+  out << "},\"observation\":{\"received\":" << (observation_.message ? "true" : "false") <<
+    ",\"fresh\":" << (fresh(observation_age) ? "true" : "false") << ",\"age_ms\":" << observation_age;
+  if (observation_.message) {
+    const auto & m = *observation_.message;
+    out << ",\"ready\":" << (m.ready ? "true" : "false") <<
+      ",\"camera_ready\":" << (m.camera_ready ? "true" : "false") <<
+      ",\"camera_calibrated\":" << (m.camera_calibrated ? "true" : "false") <<
+      ",\"odometry_ready\":" << (m.odometry_ready ? "true" : "false") <<
+      ",\"imu_ready\":" << (m.imu_ready ? "true" : "false") <<
+      ",\"image_width\":" << m.image_width << ",\"image_height\":" << m.image_height <<
+      ",\"message\":" << json_string(m.message);
+  }
+  out << "},";  out << "\"policy\":{\"received\":" << (policy_.message ? "true" : "false") <<
+    ",\"fresh\":" << (fresh(policy_age) ? "true" : "false") << ",\"age_ms\":" << policy_age;
+  if (policy_.message) {
+    const auto & m = *policy_.message;
+    out << ",\"state_name\":" << json_string(policy_name(m.state)) <<
+      ",\"provider_id\":" << json_string(m.provider_id) <<
+      ",\"model_id\":" << json_string(m.model_id) <<
+      ",\"inference_latency_ms\":" << m.inference_latency_ms <<
+      ",\"message\":" << json_string(m.message);
+  }
+  out << "},\"episode\":{\"received\":" << (episode_.message ? "true" : "false") <<
+    ",\"fresh\":" << (fresh(episode_age) ? "true" : "false") << ",\"age_ms\":" << episode_age;
+  if (episode_.message) {
+    const auto & m = *episode_.message;
+    out << ",\"state_name\":" << json_string(episode_name(m.state)) <<
+      ",\"episode_id\":" << json_string(m.episode_id) << ",\"task\":" << json_string(m.task) <<
+      ",\"directory\":" << json_string(m.directory) << ",\"message_count\":" << m.message_count <<
+      ",\"image_count\":" << m.image_count << ",\"elapsed_seconds\":" << m.elapsed_seconds <<
+      ",\"message\":" << json_string(m.message);
+  }
+  out << "},";  out << "\"shadow\":{\"received\":" << (shadow_.message ? "true" : "false") <<
+    ",\"fresh\":" << (fresh(shadow_age) ? "true" : "false") << ",\"age_ms\":" << shadow_age;
+  if (shadow_.message) {
+    const auto & m = *shadow_.message;
+    out << ",\"sample_count\":" << m.sample_count <<
+      ",\"linear_mae\":" << m.linear_mean_absolute_error <<
+      ",\"angular_mae\":" << m.angular_mean_absolute_error <<
+      ",\"prediction_fresh\":" << (m.prediction_fresh ? "true" : "false");
+  }
+  out << "},\"safety\":{\"received\":" << (safety_.message ? "true" : "false") <<
+    ",\"fresh\":" << (fresh(safety_age) ? "true" : "false") << ",\"age_ms\":" << safety_age;
+  if (safety_.message) {
+    const auto & m = *safety_.message;
+    out << ",\"severity\":" << static_cast<int>(m.severity) <<
+      ",\"rule_id\":" << json_string(m.rule_id) << ",\"reason\":" << json_string(m.reason) <<
+      ",\"active\":" << (m.active ? "true" : "false");
+  }
+  out << "},\"camera\":{\"received\":" << (!camera_data_.empty() ? "true" : "false") <<
+    ",\"fresh\":" << (fresh(camera_age) ? "true" : "false") <<
+    ",\"age_ms\":" << camera_age << ",\"bytes\":" << camera_data_.size() << "}}\n";
+  return out.str();
+}
+int main(int argc, char ** argv)
+{
+  rclcpp::init(argc, argv);
+  try {
+    auto node = std::make_shared<VehicleOpsApi>();
+    rclcpp::executors::MultiThreadedExecutor executor(rclcpp::ExecutorOptions(), 3);
+    executor.add_node(node);
+    executor.spin();
+  } catch (const std::exception & error) {
+    std::cerr << "vehicle_ops_api failed: " << error.what() << std::endl;
+    rclcpp::shutdown();
+    return 1;
+  }
+  rclcpp::shutdown();
+  return 0;
+}
