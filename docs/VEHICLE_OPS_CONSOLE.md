@@ -157,6 +157,12 @@ ssh -L 8088:127.0.0.1:8088 wheeltec@10.101.70.232
 
 浏览器访问 `http://127.0.0.1:8088`。
 
+
+## 组件控制
+
+调试台新增“组件控制 / Components”，支持白名单组件状态、依赖保护、一键场景、单组件启动/停止/重启和受控日志。完整说明见 `docs/COMPONENT_ORCHESTRATION.md`。
+
+管理面由 `vla-ops-console.service` 常驻运行；“停止受管链路”不会停止网页自身。相机离线时可在实时监控画面直接点击“启动前视相机”。
 ## HTTP API
 
 | 方法 | 路径 | Token | 作用 |
@@ -165,6 +171,10 @@ ssh -L 8088:127.0.0.1:8088 wheeltec@10.101.70.232
 | GET | `/api/camera/front.jpg` | 否 | 返回最近一帧压缩图像 |
 | GET | `/api/pipeline/live` | 否 | 返回最新被动 Pipeline Trace |
 | GET | `/api/pipeline/history` | 否 | 返回最近 30 个 Observation Trace |
+| GET | `/api/components` | 否 | 查询受管组件、健康状态与可用场景 |
+| POST | `/api/components/control` | 是 | 启动、停止或重启单个白名单组件 |
+| POST | `/api/profiles/control` | 是 | 按依赖顺序控制一键场景 |
+| GET | `/api/components/<component-id>/log` | 是 | 获取组件固定日志的有界尾部 |
 | POST | `/api/task` | 是 | 发布 `/vla/task` |
 | POST | `/api/episode/start` | 是 | 调用 Episode Start Service |
 | POST | `/api/episode/stop` | 是 | 调用 Episode Stop Service |

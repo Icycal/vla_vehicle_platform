@@ -16,6 +16,10 @@
 #include <vehicle_interfaces/srv/start_episode.hpp>
 #include <vehicle_interfaces/srv/stop_episode.hpp>
 #include <vehicle_interfaces/srv/capture_vla_debug.hpp>
+#include <vehicle_interfaces/srv/control_component.hpp>
+#include <vehicle_interfaces/srv/control_profile.hpp>
+#include <vehicle_interfaces/srv/read_component_log.hpp>
+#include <vehicle_interfaces/srv/list_components.hpp>
 #include <vehicle_interfaces/srv/run_vla_debug.hpp>
 #include <nlohmann/json.hpp>
 #include "job_manager.hpp"
@@ -154,7 +158,17 @@ std::string pipeline_stage_status_name(uint8_t status)
     default: return "WAITING";
   }
 }
-nlohmann::json pipeline_trace_json(const vehicle_interfaces::msg::PipelineTrace & trace)
+nlohmann::json component_state_json(const vehicle_interfaces::msg::ComponentState & component)
+{
+  return {{"component_id", component.component_id}, {"display_name", component.display_name},
+    {"group_name", component.group_name}, {"unit_name", component.unit_name},
+    {"state", component.state}, {"managed", component.managed}, {"healthy", component.healthy},
+    {"can_start", component.can_start}, {"can_stop", component.can_stop},
+    {"can_restart", component.can_restart}, {"pid", component.pid},
+    {"uptime_seconds", component.uptime_seconds}, {"last_exit_code", component.last_exit_code},
+    {"message", component.message}, {"dependencies", component.dependencies},
+    {"expected_nodes", component.expected_nodes}, {"health_topics", component.health_topics}};
+}nlohmann::json pipeline_trace_json(const vehicle_interfaces::msg::PipelineTrace & trace)
 {
   nlohmann::json stages = nlohmann::json::array();
   for (const auto & stage : trace.stages) {
@@ -243,6 +257,10 @@ private:
   HttpResponse camera();
   HttpResponse pipeline_live();
   HttpResponse pipeline_history();
+  HttpResponse components_list();
+  HttpResponse component_control(const std::string & body);
+  HttpResponse profile_control(const std::string & body);
+  HttpResponse component_log(const std::string & component_id);
   HttpResponse task(const std::string & body);
   HttpResponse start_episode(const std::string & body);
   HttpResponse stop_episode();
@@ -293,6 +311,10 @@ private:
   rclcpp::Client<vehicle_interfaces::srv::RequestSafeStop>::SharedPtr safe_client_;
   rclcpp::Client<vehicle_interfaces::srv::CaptureVlaDebug>::SharedPtr debug_capture_client_;
   rclcpp::Client<vehicle_interfaces::srv::RunVlaDebug>::SharedPtr debug_run_client_;
+  rclcpp::Client<vehicle_interfaces::srv::ListComponents>::SharedPtr components_client_;
+  rclcpp::Client<vehicle_interfaces::srv::ControlComponent>::SharedPtr component_control_client_;
+  rclcpp::Client<vehicle_interfaces::srv::ControlProfile>::SharedPtr profile_control_client_;
+  rclcpp::Client<vehicle_interfaces::srv::ReadComponentLog>::SharedPtr component_log_client_;
 };
 VehicleOpsApi::VehicleOpsApi() : Node("vehicle_ops_api")
 {
@@ -348,6 +370,10 @@ VehicleOpsApi::VehicleOpsApi() : Node("vehicle_ops_api")
   safe_client_ = create_client<vehicle_interfaces::srv::RequestSafeStop>("/vehicle/request_safe_stop");
   debug_capture_client_ = create_client<vehicle_interfaces::srv::CaptureVlaDebug>("/vla/debug/capture");
   debug_run_client_ = create_client<vehicle_interfaces::srv::RunVlaDebug>("/vla/debug/run");
+  components_client_ = create_client<vehicle_interfaces::srv::ListComponents>("/vehicle/operations/list_components");
+  component_control_client_ = create_client<vehicle_interfaces::srv::ControlComponent>("/vehicle/operations/control_component");
+  profile_control_client_ = create_client<vehicle_interfaces::srv::ControlProfile>("/vehicle/operations/control_profile");
+  component_log_client_ = create_client<vehicle_interfaces::srv::ReadComponentLog>("/vehicle/operations/read_component_log");
   jobs_ = std::make_unique<vehicle_ops::JobManager>(project_root_, jobs_root_);
   start_server();
   RCLCPP_INFO(get_logger(), "Vehicle Ops listening on http://%s:%d", bind_.c_str(), port_);
@@ -464,6 +490,17 @@ HttpResponse VehicleOpsApi::route(const HttpRequest & request)
   if (request.method == "GET" && path == "/api/camera/front.jpg") {return camera();}
   if (request.method == "GET" && path == "/api/pipeline/live") {return pipeline_live();}
   if (request.method == "GET" && path == "/api/pipeline/history") {return pipeline_history();}
+  if (request.method == "GET" && path == "/api/components") {return components_list();}
+  if (path.rfind("/api/components/", 0) == 0 && path.size() > 20 && path.rfind("/log") == path.size() - 4) {
+    const auto denied = authorize(request);
+    if (denied) {return *denied;}
+    return component_log(path.substr(16, path.size() - 20));
+  }
+  if (request.method == "POST" && (path == "/api/components/control" || path == "/api/profiles/control")) {
+    const auto denied = authorize(request);
+    if (denied) {return *denied;}
+    return path == "/api/components/control" ? component_control(request.body) : profile_control(request.body);
+  }
   if (path.rfind("/api/vla-debug/", 0) == 0) {
     const auto denied = authorize(request);
     if (denied) {return *denied;}
@@ -554,7 +591,75 @@ HttpResponse VehicleOpsApi::pipeline_history()
   for (const auto & trace : pipeline_history_) {values.push_back(pipeline_trace_json(trace));}
   return {200, "application/json; charset=utf-8", nlohmann::json({{"traces", values}}).dump() + "\n",
     {{"Cache-Control", "no-store"}}};
-}HttpResponse VehicleOpsApi::task(const std::string & body)
+}HttpResponse VehicleOpsApi::components_list()
+{
+  if (!components_client_->wait_for_service(250ms)) {return error(503, "Operation Orchestrator is unavailable");}
+  auto future = components_client_->async_send_request(std::make_shared<vehicle_interfaces::srv::ListComponents::Request>());
+  if (future.wait_for(std::chrono::milliseconds(static_cast<int>(service_seconds_ * 1000))) != std::future_status::ready) {
+    return error(408, "Component status request timed out");
+  }
+  const auto response = future.get();
+  nlohmann::json components = nlohmann::json::array();
+  for (const auto & component : response->components) {components.push_back(component_state_json(component));}
+  return {200, "application/json; charset=utf-8",
+    nlohmann::json({{"components", components}, {"profiles", response->profiles}}).dump() + "\n",
+    {{"Cache-Control", "no-store"}}};
+}
+HttpResponse VehicleOpsApi::component_control(const std::string & body)
+{
+  if (!component_control_client_->wait_for_service(250ms)) {return error(503, "Operation Orchestrator is unavailable");}
+  nlohmann::json input;
+  try {input = nlohmann::json::parse(body);}
+  catch (const nlohmann::json::exception &) {return error(400, "Request body must be valid JSON");}
+  if (!input.contains("component_id") || !input.at("component_id").is_string() ||
+    !input.contains("action") || !input.at("action").is_string())
+  {return error(400, "component_id and action are required");}
+  auto request = std::make_shared<vehicle_interfaces::srv::ControlComponent::Request>();
+  request->component_id = input.at("component_id").get<std::string>();
+  request->action = input.at("action").get<std::string>();
+  request->force = input.value("force", false);
+  auto future = component_control_client_->async_send_request(request);
+  if (future.wait_for(std::chrono::milliseconds(static_cast<int>(service_seconds_ * 4000))) != std::future_status::ready) {
+    return error(408, "Component operation timed out");
+  }
+  const auto response = future.get();
+  if (!response->accepted) {return error(409, response->message);}
+  return success(response->message, "\"component\":" + component_state_json(response->component).dump());
+}
+HttpResponse VehicleOpsApi::profile_control(const std::string & body)
+{
+  if (!profile_control_client_->wait_for_service(250ms)) {return error(503, "Operation Orchestrator is unavailable");}
+  nlohmann::json input;
+  try {input = nlohmann::json::parse(body);}
+  catch (const nlohmann::json::exception &) {return error(400, "Request body must be valid JSON");}
+  if (!input.contains("profile_id") || !input.at("profile_id").is_string() ||
+    !input.contains("action") || !input.at("action").is_string())
+  {return error(400, "profile_id and action are required");}
+  auto request = std::make_shared<vehicle_interfaces::srv::ControlProfile::Request>();
+  request->profile_id = input.at("profile_id").get<std::string>();
+  request->action = input.at("action").get<std::string>();
+  auto future = profile_control_client_->async_send_request(request);
+  if (future.wait_for(std::chrono::milliseconds(static_cast<int>(service_seconds_ * 8000))) != std::future_status::ready) {
+    return error(408, "Profile operation timed out");
+  }
+  const auto response = future.get();
+  if (!response->accepted) {return error(409, response->message);}
+  return success(response->message);
+}
+HttpResponse VehicleOpsApi::component_log(const std::string & component_id)
+{
+  if (!component_log_client_->wait_for_service(250ms)) {return error(503, "Operation Orchestrator is unavailable");}
+  auto request = std::make_shared<vehicle_interfaces::srv::ReadComponentLog::Request>();
+  request->component_id = component_id;
+  auto future = component_log_client_->async_send_request(request);
+  if (future.wait_for(std::chrono::milliseconds(static_cast<int>(service_seconds_ * 2000))) != std::future_status::ready) {
+    return error(408, "Component log request timed out");
+  }
+  const auto response = future.get();
+  if (!response->accepted) {return error(404, response->message);}
+  return {200, "text/plain; charset=utf-8", response->content, {{"Cache-Control", "no-store"}}};
+}
+HttpResponse VehicleOpsApi::task(const std::string & body)
 {
   const auto value = trim(body);
   if (value.empty()) {return error(400, "Task text is required");}

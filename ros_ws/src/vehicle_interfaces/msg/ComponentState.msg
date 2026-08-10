@@ -1,0 +1,17 @@
+string component_id
+string display_name
+string group_name
+string unit_name
+string state
+bool managed
+bool healthy
+bool can_start
+bool can_stop
+bool can_restart
+int64 pid
+float64 uptime_seconds
+int32 last_exit_code
+string message
+string[] dependencies
+string[] expected_nodes
+string[] health_topics

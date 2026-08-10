@@ -5,6 +5,10 @@
   <arg name="project_root" default="/home/wheeltec/vla_vehicle_platform"/>
   <arg name="jobs_root" default="/home/wheeltec/vla_vehicle_platform/run/ops/jobs"/>
 
+  <node pkg="vehicle_operation" exec="operation_orchestrator" name="operation_orchestrator" output="screen">
+    <param from="$(find-pkg-share vehicle_operation)/config/components.yaml"/>
+  </node>
+
   <node pkg="vehicle_ops" exec="vehicle_ops_api" name="vehicle_ops_api" output="screen">
     <param from="$(find-pkg-share vehicle_ops)/config/vehicle_ops.yaml"/>
     <param name="bind_address" value="$(var bind_address)"/>

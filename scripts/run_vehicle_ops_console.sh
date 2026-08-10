@@ -47,8 +47,8 @@ for vehicle_ip in "${vehicle_ips[@]}"; do
   seen_ips["${vehicle_ip}"]=1
   echo "  http://${vehicle_ip}:${VEHICLE_OPS_PORT}"
 done
-echo "Operator token: ${VEHICLE_OPS_OPERATOR_TOKEN}"
-echo "Write operations are accepted only with this token."
+echo "Operator token loaded from protected runtime configuration."
+echo "Write operations require the browser session token."
 
 exec ros2 launch vehicle_ops vehicle_ops.launch.xml \
   bind_address:="${VEHICLE_OPS_BIND_ADDRESS}" \

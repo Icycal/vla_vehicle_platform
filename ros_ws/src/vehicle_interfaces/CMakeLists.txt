@@ -10,6 +10,7 @@ find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
+  msg/ComponentState.msg
   msg/ControlLease.msg
   msg/EpisodeState.msg
   msg/ObservationStatus.msg
@@ -23,6 +24,10 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   msg/ShadowMetrics.msg
   msg/SystemState.msg
   msg/TeleopCommand.msg
+  srv/ControlComponent.srv
+  srv/ControlProfile.srv
+  srv/ReadComponentLog.srv
+  srv/ListComponents.srv
   srv/CaptureVlaDebug.srv
   srv/RunVlaDebug.srv
   srv/RequestControlMode.srv

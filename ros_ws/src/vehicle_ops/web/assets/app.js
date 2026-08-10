@@ -1,5 +1,5 @@
 const $ = (id) => document.getElementById(id);
-const state = { token: sessionStorage.getItem("vehicleOpsToken") || "", cameraSequence: 0, pipelineCameraSequence: 0, cameraStatus: null, pipelineCameraActive: false, selectedJobId: "", jobs: [], debugRunId: "", debugResult: null, debugImageUrls: {}, pipelineTrace: null, pipelineHistory: [], selectedPipelineStageId: "", selectedPipelineHistoryId: "", inspectorMode: "live" };
+const state = { token: sessionStorage.getItem("vehicleOpsToken") || "", cameraSequence: 0, pipelineCameraSequence: 0, cameraStatus: null, pipelineCameraActive: false, selectedJobId: "", jobs: [], debugRunId: "", debugResult: null, debugImageUrls: {}, pipelineTrace: null, pipelineHistory: [], selectedPipelineStageId: "", selectedPipelineHistoryId: "", inspectorMode: "live", components: [], componentProfiles: [], selectedComponentId: "" };
 const text = (id, value) => { $(id).textContent = value ?? "—"; };
 const number = (value, digits = 1) => Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : "--";
 function toast(message, error = false) {
@@ -339,6 +339,7 @@ function pipelineStageDescription(stage) {
   });
   document.querySelectorAll("[data-inspector-panel]").forEach((panel) => panel.classList.toggle("active", panel.dataset.inspectorPanel === mode));
   if (mode === "history") refreshPipelineHistory(true);
+  if (mode === "components") refreshComponents(true);
 }
 function stageById(trace, stageId) {
   return trace?.stages?.find((stage) => stage.stage_id === stageId);
@@ -570,6 +571,92 @@ async function runDebugStage(stage) {
     toast(response.message);
   } finally { setDebugBusy(false); }
 }
+const componentStateLabels = {
+  running: ["运行正常", "RUNNING"], degraded: ["运行异常", "DEGRADED"], stopped: ["已停止", "STOPPED"],
+  starting: ["启动中", "STARTING"], stopping: ["停止中", "STOPPING"], failed: ["启动失败", "FAILED"],
+  external: ["外部启动", "EXTERNAL"], unavailable: ["未安装", "UNAVAILABLE"]
+};
+function componentLabel(stateName) { return componentStateLabels[stateName] || ["未知", String(stateName || "UNKNOWN").toUpperCase()]; }
+function componentDescription(component) {
+  return ({
+    running: "systemd 服务、ROS 节点和健康 Topic 均正常。",
+    degraded: "服务正在运行，但部分 ROS 节点或健康 Topic 尚未就绪。",
+    stopped: "组件当前未运行，可以从调试台启动。",
+    starting: "systemd 正在启动组件，请稍候。",
+    stopping: "systemd 正在停止组件，请稍候。",
+    failed: `组件异常退出，最近退出码 ${component.last_exit_code}。`,
+    external: "检测到同名 ROS 节点由外部 Launch 启动；为避免重复进程，网页控制已禁用。",
+    unavailable: "对应 systemd 用户服务尚未安装。"
+  })[component.state] || component.message || "等待组件状态。";
+}
+function renderComponents() {
+  const grid = $("componentGrid");
+  grid.replaceChildren();
+  if (!state.components.length) {
+    grid.innerHTML = '<div class="job-empty"><strong>未发现受管组件</strong><span>检查 Operation Orchestrator 和 systemd 用户服务</span></div>';
+    return;
+  }
+  state.components.forEach((component) => {
+    const label = componentLabel(component.state);
+    const card = document.createElement("article");
+    card.className = "component-card";
+    card.innerHTML = `<div class="component-card-head"><h3>${component.display_name}<small>${component.component_id}</small></h3><span class="component-state ${component.state}">${label[0]} · ${label[1]}</span></div>
+      <div class="component-meta"><div><small>进程 PID</small><strong>${component.pid || "--"}</strong></div><div><small>运行时间</small><strong>${component.uptime_seconds > 0 ? `${number(component.uptime_seconds, 0)} s` : "--"}</strong></div><div><small>组件分组</small><strong>${component.group_name || "--"}</strong></div></div>
+      <p class="component-message">${componentDescription(component)}</p><p class="component-dependencies">依赖：${component.dependencies?.length ? component.dependencies.join(" → ") : "无"}</p>
+      <div class="component-actions"><button class="button primary" data-component-action="start" ${component.can_start ? "" : "disabled"}>启动</button><button class="button secondary" data-component-action="stop" ${component.can_stop ? "" : "disabled"}>停止</button><button class="button secondary" data-component-action="restart" ${component.can_restart ? "" : "disabled"}>重启</button><button class="button ghost" data-component-log>日志</button></div>`;
+    card.querySelectorAll("[data-component-action]").forEach((button) => button.addEventListener("click", () => controlComponent(component.component_id, button.dataset.componentAction)));
+    card.querySelector("[data-component-log]").addEventListener("click", () => loadComponentLog(component.component_id, component.display_name));
+    grid.appendChild(card);
+  });
+}
+async function refreshComponents(showError = false) {
+  try {
+    const response = await fetch("/api/components", { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const result = await response.json();
+    state.components = result.components || [];
+    state.componentProfiles = result.profiles || [];
+    badge($("componentApiState"), true, `${state.components.length} 个组件`, "编排离线");
+    renderComponents();
+  } catch (error) {
+    badge($("componentApiState"), false, "编排在线", "编排离线");
+    if (showError) toast(error.message, true);
+  }
+}
+async function controlComponent(componentId, action) {
+  if (["stop", "restart"].includes(action) && !confirm(`确认${action === "stop" ? "停止" : "重启"}组件 ${componentId}？`)) return;
+  $("componentGrid").classList.add("component-action-busy");
+  try {
+    const result = await jobFetch("/api/components/control", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ component_id: componentId, action }) });
+    toast(result.message); await refreshComponents();
+  } catch (error) { toast(error.message, true); }
+  finally { $("componentGrid").classList.remove("component-action-busy"); }
+}
+async function controlProfile(profileId, action) {
+  if (action === "stop" && !confirm("确认停止完整受管 Shadow 链路？Vehicle Ops 管理面会继续运行。")) return;
+  document.querySelectorAll("[data-profile-action]").forEach((button) => button.disabled = true);
+  try {
+    const result = await jobFetch("/api/profiles/control", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ profile_id: profileId, action }) });
+    toast(result.message); await refreshComponents();
+  } catch (error) { toast(error.message, true); }
+  finally { document.querySelectorAll("[data-profile-action]").forEach((button) => button.disabled = false); }
+}
+async function loadComponentLog(componentId, displayName = componentId) {
+  state.selectedComponentId = componentId;
+  text("componentLogTitle", `${displayName} · ${componentId}`);
+  $("refreshComponentLog").disabled = false;
+  text("componentLog", "正在读取日志…");
+  try { text("componentLog", await jobFetch(`/api/components/${componentId}/log`)); }
+  catch (error) { text("componentLog", error.message); toast(error.message, true); }
+}
+document.querySelectorAll("[data-profile-action]").forEach((button) => button.addEventListener("click", () => {
+  const [profileId, action] = button.dataset.profileAction.split(":"); controlProfile(profileId, action);
+}));
+$("refreshComponentLog").addEventListener("click", () => {
+  const component = state.components.find((item) => item.component_id === state.selectedComponentId);
+  if (component) loadComponentLog(component.component_id, component.display_name);
+});
+$("startCameraQuick").addEventListener("click", () => controlComponent("front_camera", "start"));
 $("captureDebug").addEventListener("click", async () => {
   try { await captureDebugObservation(); } catch (error) { setDebugStage("capture", "执行失败", "failed"); showDebugError(error); toast(error.message, true); setDebugBusy(false); }
 });
@@ -591,8 +678,10 @@ setView(["monitor", "capture", "debug", "tools"].includes(location.hash.slice(1)
 refresh();
 refreshPipeline();
 refreshPipelineHistory();
+refreshComponents();
 refreshJobs();
 setInterval(refresh, 1000);
 setInterval(refreshPipeline, 1000);
 setInterval(refreshPipelineHistory, 5000);
+setInterval(refreshComponents, 2000);
 setInterval(() => refreshJobs(), 2000);

@@ -1,0 +1,9 @@
+<launch>
+  <arg name="shadow_params" default="$(find-pkg-share vehicle_bringup)/config/phase1_shadow.yaml"/>
+  <node pkg="vehicle_data" exec="observation_monitor" name="observation_monitor" output="screen">
+    <param from="$(var shadow_params)"/>
+  </node>
+  <node pkg="vehicle_adapters" exec="observation_adapter" name="observation_adapter" output="screen">
+    <param from="$(var shadow_params)"/>
+  </node>
+</launch>

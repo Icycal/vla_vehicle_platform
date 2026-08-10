@@ -1,0 +1,6 @@
+string profile_id
+string action
+---
+bool accepted
+string message
+ComponentState[] components

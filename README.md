@@ -272,3 +272,5 @@ a deployable checkpoint. See `training/README.md`.
 
 Do not source either legacy workspace before building or running this project. See
 `DEPENDENCIES.md` for source provenance and licensing constraints.
+
+- 组件编排与网页启停：`docs/COMPONENT_ORCHESTRATION.md`

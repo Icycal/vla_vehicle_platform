@@ -1,0 +1,17 @@
+[Unit]
+Description=VLA Debug Pipeline
+After=vla-observation-pipeline.service
+Wants=vla-observation-pipeline.service
+[Service]
+Type=simple
+WorkingDirectory=/home/wheeltec/vla_vehicle_platform
+Environment=ROS_DOMAIN_ID=43
+ExecStart=/home/wheeltec/vla_vehicle_platform/scripts/run_managed_component.sh vla_debug_pipeline
+StandardOutput=append:/home/wheeltec/vla_vehicle_platform/run/log/components/vla_debug_pipeline.log
+StandardError=append:/home/wheeltec/vla_vehicle_platform/run/log/components/vla_debug_pipeline.log
+Restart=on-failure
+RestartSec=2
+KillMode=mixed
+TimeoutStopSec=15
+[Install]
+WantedBy=default.target

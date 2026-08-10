@@ -1,0 +1,7 @@
+string component_id
+string action
+bool force
+---
+bool accepted
+string message
+ComponentState component

@@ -1,0 +1,17 @@
+[Unit]
+Description=VLA Observation Pipeline
+After=vla-front-camera.service vla-runtime-core.service
+Wants=vla-front-camera.service vla-runtime-core.service
+[Service]
+Type=simple
+WorkingDirectory=/home/wheeltec/vla_vehicle_platform
+Environment=ROS_DOMAIN_ID=43
+ExecStart=/home/wheeltec/vla_vehicle_platform/scripts/run_managed_component.sh observation_pipeline
+StandardOutput=append:/home/wheeltec/vla_vehicle_platform/run/log/components/observation_pipeline.log
+StandardError=append:/home/wheeltec/vla_vehicle_platform/run/log/components/observation_pipeline.log
+Restart=on-failure
+RestartSec=2
+KillMode=mixed
+TimeoutStopSec=15
+[Install]
+WantedBy=default.target

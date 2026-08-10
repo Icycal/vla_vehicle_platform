@@ -1,0 +1,11 @@
+<launch>
+  <arg name="shadow_params" default="$(find-pkg-share vehicle_bringup)/config/phase1_shadow.yaml"/>
+  <arg name="policy_params_file" default="$(find-pkg-share vehicle_bringup)/config/phase0.yaml"/>
+  <node pkg="vehicle_pipeline_trace" exec="pipeline_trace_aggregator" name="pipeline_trace_aggregator" output="screen">
+    <param from="$(var shadow_params)"/>
+  </node>
+  <node pkg="vehicle_vla_debug" exec="vla_debug_orchestrator" name="vla_debug_orchestrator" output="screen">
+    <param from="$(var policy_params_file)"/>
+    <param from="$(var shadow_params)"/>
+  </node>
+</launch>

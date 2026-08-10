@@ -1,0 +1,17 @@
+[Unit]
+Description=VLA Shadow Evaluation and Episode Data
+After=vla-debug-pipeline.service
+Wants=vla-debug-pipeline.service
+[Service]
+Type=simple
+WorkingDirectory=/home/wheeltec/vla_vehicle_platform
+Environment=ROS_DOMAIN_ID=43
+ExecStart=/home/wheeltec/vla_vehicle_platform/scripts/run_managed_component.sh shadow_data
+StandardOutput=append:/home/wheeltec/vla_vehicle_platform/run/log/components/shadow_data.log
+StandardError=append:/home/wheeltec/vla_vehicle_platform/run/log/components/shadow_data.log
+Restart=on-failure
+RestartSec=2
+KillMode=mixed
+TimeoutStopSec=15
+[Install]
+WantedBy=default.target

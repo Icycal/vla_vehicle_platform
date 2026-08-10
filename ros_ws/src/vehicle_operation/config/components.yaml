@@ -1,0 +1,45 @@
+operation_orchestrator:
+  ros__parameters:
+    component_ids:
+      - front_camera
+      - runtime_core
+      - observation_pipeline
+      - vla_debug_pipeline
+      - shadow_data
+    components.front_camera.display_name: "前视相机"
+    components.front_camera.group_name: "传感器"
+    components.front_camera.unit: "vla-front-camera.service"
+    components.front_camera.log_path: "/home/wheeltec/vla_vehicle_platform/run/log/components/front_camera.log"
+    components.front_camera.expected_nodes: ["front_camera", "front_camera_compressor"]
+    components.front_camera.health_topics: ["/camera/image_compressed"]
+    components.runtime_core.display_name: "车辆运行时核心"
+    components.runtime_core.group_name: "运行时"
+    components.runtime_core.unit: "vla-runtime-core.service"
+    components.runtime_core.log_path: "/home/wheeltec/vla_vehicle_platform/run/log/components/runtime_core.log"
+    components.runtime_core.expected_nodes: ["vehicle_supervisor", "vla_policy_gateway", "vla_action_runtime", "vla_control_mux", "vla_safety_guard"]
+    components.runtime_core.health_topics: ["/vehicle/system_state"]
+    components.observation_pipeline.display_name: "Observation 链路"
+    components.observation_pipeline.group_name: "数据链路"
+    components.observation_pipeline.unit: "vla-observation-pipeline.service"
+    components.observation_pipeline.log_path: "/home/wheeltec/vla_vehicle_platform/run/log/components/observation_pipeline.log"
+    components.observation_pipeline.dependencies: ["front_camera", "runtime_core"]
+    components.observation_pipeline.expected_nodes: ["observation_monitor", "observation_adapter"]
+    components.observation_pipeline.health_topics: ["/vehicle/observation_status", "/vla/observation"]
+    components.vla_debug_pipeline.display_name: "VLA 调试链路"
+    components.vla_debug_pipeline.group_name: "VLA"
+    components.vla_debug_pipeline.unit: "vla-debug-pipeline.service"
+    components.vla_debug_pipeline.log_path: "/home/wheeltec/vla_vehicle_platform/run/log/components/vla_debug_pipeline.log"
+    components.vla_debug_pipeline.dependencies: ["observation_pipeline"]
+    components.vla_debug_pipeline.expected_nodes: ["pipeline_trace_aggregator", "vla_debug_orchestrator"]
+    components.vla_debug_pipeline.health_topics: ["/vla/pipeline_trace"]
+    components.shadow_data.display_name: "Shadow 与数据采集"
+    components.shadow_data.group_name: "VLA"
+    components.shadow_data.unit: "vla-shadow-data.service"
+    components.shadow_data.log_path: "/home/wheeltec/vla_vehicle_platform/run/log/components/shadow_data.log"
+    components.shadow_data.dependencies: ["vla_debug_pipeline"]
+    components.shadow_data.expected_nodes: ["shadow_evaluator", "episode_recorder"]
+    components.shadow_data.health_topics: ["/vla/shadow_metrics", "/vehicle/episode_state"]
+    profile_ids: ["camera_only", "vla_debug", "full_shadow"]
+    profiles.camera_only.components: ["front_camera"]
+    profiles.vla_debug.components: ["front_camera", "runtime_core", "observation_pipeline", "vla_debug_pipeline"]
+    profiles.full_shadow.components: ["front_camera", "runtime_core", "observation_pipeline", "vla_debug_pipeline", "shadow_data"]

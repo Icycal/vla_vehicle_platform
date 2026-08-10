@@ -1,0 +1,18 @@
+[Unit]
+Description=VLA Vehicle Operations Management Plane
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/wheeltec/vla_vehicle_platform
+Environment=ROS_DOMAIN_ID=43
+ExecStart=/home/wheeltec/vla_vehicle_platform/scripts/run_vehicle_ops_console.sh
+StandardOutput=append:/home/wheeltec/vla_vehicle_platform/run/log/components/ops_console.log
+StandardError=append:/home/wheeltec/vla_vehicle_platform/run/log/components/ops_console.log
+Restart=on-failure
+RestartSec=2
+KillMode=mixed
+TimeoutStopSec=15
+
+[Install]
+WantedBy=default.target
