@@ -1,4 +1,4 @@
-import json
+﻿import json
 import os
 import threading
 import time
@@ -28,10 +28,7 @@ class SmolVLAPolicyProvider(PolicyProvider):
     def __init__(self) -> None:
         self._model_dir = Path(os.environ.get("SMOLVLA_MODEL_DIR", "/models/smolvla_base"))
         self._vlm_manifest = Path(
-            os.environ.get(
-                "SMOLVLA_VLM_MANIFEST",
-                "/models/huggingface/smolvlm-manifest.json",
-            )
+            os.environ.get("SMOLVLA_VLM_MANIFEST", "/models/huggingface/smolvlm-manifest.json")
         )
         self._source_image_key = os.environ.get(
             "SMOLVLA_SOURCE_IMAGE_KEY", "observation.images.front"
@@ -45,12 +42,10 @@ class SmolVLAPolicyProvider(PolicyProvider):
         self._require_valid_state = os.environ.get("SMOLVLA_REQUIRE_VALID_STATE", "0") == "1"
         self._allow_image_fallback = os.environ.get("SMOLVLA_ALLOW_IMAGE_FALLBACK", "1") == "1"
         self._control_period_ns = max(
-            1_000_000,
-            int(os.environ.get("SMOLVLA_CONTROL_PERIOD_MS", "100")) * 1_000_000,
+            1_000_000, int(os.environ.get("SMOLVLA_CONTROL_PERIOD_MS", "100")) * 1_000_000
         )
         self._response_margin_ns = max(
-            0,
-            int(os.environ.get("SMOLVLA_RESPONSE_MARGIN_MS", "500")) * 1_000_000,
+            0, int(os.environ.get("SMOLVLA_RESPONSE_MARGIN_MS", "500")) * 1_000_000
         )
         self._adapter = create_action_adapter()
         self._predict_lock = threading.Lock()
@@ -114,18 +109,12 @@ class SmolVLAPolicyProvider(PolicyProvider):
         if not vlm_path.is_dir():
             raise FileNotFoundError(f"SmolVLM snapshot not found: {vlm_path}")
 
-        config = PreTrainedConfig.from_pretrained(
-            self._model_dir,
-            local_files_only=True,
-        )
+        config = PreTrainedConfig.from_pretrained(self._model_dir, local_files_only=True)
         config.device = "cuda"
         config.vlm_model_name = str(vlm_path)
         load_started = time.perf_counter()
         policy = SmolVLAPolicy.from_pretrained(
-            self._model_dir,
-            config=config,
-            local_files_only=True,
-            strict=True,
+            self._model_dir, config=config, local_files_only=True, strict=True
         )
         policy.eval()
         policy.reset()
@@ -153,11 +142,7 @@ class SmolVLAPolicyProvider(PolicyProvider):
             self._predict_raw(synthetic_image, synthetic_state, "system warmup")
 
     def _select_image(self, request):
-        selected = None
-        for image in request.images:
-            if image.key == self._source_image_key:
-                selected = image
-                break
+        selected = next((image for image in request.images if image.key == self._source_image_key), None)
         if selected is None and self._allow_image_fallback and len(request.images) == 1:
             selected = request.images[0]
         if selected is None:
@@ -168,51 +153,154 @@ class SmolVLAPolicyProvider(PolicyProvider):
             raise ValueError(f"unable to decode image: {selected.key} format={selected.format}")
         decoded_rgb = self._cv2.cvtColor(decoded_bgr, self._cv2.COLOR_BGR2RGB)
         resized = self._cv2.resize(decoded_rgb, (256, 256), interpolation=self._cv2.INTER_AREA)
-        return self._numpy.ascontiguousarray(resized)
+        metadata = {
+            "source_key": selected.key,
+            "format": selected.format,
+            "encoded_bytes": len(selected.data),
+            "original_shape": list(decoded_rgb.shape),
+            "processed_shape": list(resized.shape),
+            "model_camera_keys": list(self._model_camera_keys),
+        }
+        return self._numpy.ascontiguousarray(resized), metadata
 
     def _select_state(self, request):
         values = {item.key: item for item in request.state}
         state = []
+        state_details = []
         for key in self._state_keys:
             item = values.get(key)
             if item is None:
                 raise ValueError(f"required state key is missing: {key}")
             if self._require_valid_state and not item.valid:
                 raise ValueError(f"required state key is invalid: {key}")
-            state.append(float(item.value) if item.valid else 0.0)
-        return self._numpy.asarray(state, dtype=self._numpy.float32)
+            value = float(item.value) if item.valid else 0.0
+            state.append(value)
+            state_details.append({"key": key, "value": value, "valid": bool(item.valid)})
+        return self._numpy.asarray(state, dtype=self._numpy.float32), state_details
 
-    def _postprocess_actions(self, normalized_chunk, action_count: int):
-        raw_actions = []
-        for action_index in range(action_count):
-            normalized_action = normalized_chunk[:, action_index]
-            action = self._postprocessor(normalized_action)
-            raw_actions.append(
-                action.squeeze(0).detach().cpu().numpy().astype(float).tolist()
-            )
-        return raw_actions
-
-    def _predict_raw(self, image, state, task: str):
+    def _prepare_model_input(self, image, state, task: str):
         raw_observation = {"observation.state": state}
         for camera_key in self._model_camera_keys:
             raw_observation[camera_key] = image
         model_input = self._prepare_observation_for_inference(
-            raw_observation,
-            device=self._device,
-            task=task,
+            raw_observation, device=self._device, task=task
         )
-        model_input = self._preprocessor(model_input)
+        return self._preprocessor(model_input)
+
+    def _infer_normalized_chunk(self, model_input):
         self._torch.cuda.synchronize()
         inference_started = time.perf_counter()
         with self._torch.inference_mode():
             normalized_chunk = self._policy.predict_action_chunk(model_input)
         self._torch.cuda.synchronize()
         self._last_inference_ms = (time.perf_counter() - inference_started) * 1000.0
+        return normalized_chunk
+
+    def _postprocess_actions(self, normalized_chunk, action_count: int):
+        raw_actions = []
+        for action_index in range(action_count):
+            normalized_action = normalized_chunk[:, action_index]
+            action = self._postprocessor(normalized_action)
+            raw_actions.append(action.squeeze(0).detach().cpu().numpy().astype(float).tolist())
+        return raw_actions
+
+    def _predict_raw(self, image, state, task: str):
+        model_input = self._prepare_model_input(image, state, task)
+        normalized_chunk = self._infer_normalized_chunk(model_input)
         action_count = min(
-            normalized_chunk.shape[1],
-            int(os.environ.get("SMOLVLA_ACTION_HORIZON", "8")),
+            normalized_chunk.shape[1], int(os.environ.get("SMOLVLA_ACTION_HORIZON", "8"))
         )
         return self._postprocess_actions(normalized_chunk, action_count)
+
+    def _tensor_summary(self, value):
+        if self._torch.is_tensor(value):
+            detached = value.detach()
+            summary = {
+                "shape": list(detached.shape),
+                "dtype": str(detached.dtype).replace("torch.", ""),
+                "device": str(detached.device),
+                "elements": detached.numel(),
+            }
+            if detached.numel() and detached.is_floating_point():
+                numeric = detached.float()
+                summary.update(
+                    minimum=float(numeric.min().item()),
+                    maximum=float(numeric.max().item()),
+                    mean=float(numeric.mean().item()),
+                )
+            return summary
+        if isinstance(value, (list, tuple)):
+            return {"type": type(value).__name__, "length": len(value)}
+        return {"type": type(value).__name__}
+
+    def _debug_result(self, request, stage: str):
+        total_started = time.perf_counter()
+        preprocessing_started = time.perf_counter()
+        image, image_metadata = self._select_image(request)
+        state, state_details = self._select_state(request)
+        model_input = self._prepare_model_input(image, state, request.task)
+        preprocessing_ms = (time.perf_counter() - preprocessing_started) * 1000.0
+        encoded_ok, processed_jpeg = self._cv2.imencode(
+            ".jpg", self._cv2.cvtColor(image, self._cv2.COLOR_RGB2BGR)
+        )
+        if not encoded_ok:
+            raise RuntimeError("failed to encode processed debug image")
+        result = {
+            "schema_version": "vehicle.vla.debug.v1",
+            "stage": stage,
+            "provider_id": self.provider_id,
+            "model_id": self.model_id,
+            "observation": {
+                "observation_id": request.observation_id,
+                "task": request.task,
+                "image": image_metadata,
+                "state": state_details,
+            },
+            "preprocessing": {
+                "resize": [256, 256],
+                "color_space": "RGB",
+                "model_inputs": {
+                    key: self._tensor_summary(value) for key, value in model_input.items()
+                },
+            },
+            "latency_ms": {"preprocessing": preprocessing_ms},
+            "safety": {
+                "operation_mode": os.environ.get("POLICY_OPERATION_MODE", "shadow"),
+                "publishes_control": False,
+            },
+        }
+        if stage == "inference":
+            normalized_chunk = self._infer_normalized_chunk(model_input)
+            postprocess_started = time.perf_counter()
+            action_count = min(
+                normalized_chunk.shape[1], int(os.environ.get("SMOLVLA_ACTION_HORIZON", "8"))
+            )
+            raw_actions = self._postprocess_actions(normalized_chunk, action_count)
+            adapted_actions = self._adapter.adapt(raw_actions)
+            result["raw_output"] = {
+                "normalized_action_chunk": {
+                    "shape": list(normalized_chunk.shape),
+                    "dtype": str(normalized_chunk.dtype).replace("torch.", ""),
+                    "values": normalized_chunk.squeeze(0).detach().cpu().float().numpy().tolist(),
+                },
+                "denormalized_actions": {
+                    "shape": [len(raw_actions), len(raw_actions[0]) if raw_actions else 0],
+                    "values": raw_actions,
+                },
+            }
+            result["interpreted_output"] = {
+                "adapter_id": self._adapter.adapter_id,
+                "twist_actions": [
+                    {"linear_x": float(linear), "angular_z": float(angular)}
+                    for linear, angular in adapted_actions
+                ],
+            }
+            result["latency_ms"].update(
+                inference=self._last_inference_ms,
+                postprocessing=(time.perf_counter() - postprocess_started) * 1000.0,
+            )
+        result["latency_ms"]["total"] = (time.perf_counter() - total_started) * 1000.0
+        return result, processed_jpeg.tobytes()
 
     def predict(self, request, protocol):
         if not self._ready:
@@ -226,8 +314,8 @@ class SmolVLAPolicyProvider(PolicyProvider):
         if not self._predict_lock.acquire(blocking=False):
             raise RuntimeError("SmolVLA provider is busy")
         try:
-            image = self._select_image(request)
-            state = self._select_state(request)
+            image, _ = self._select_image(request)
+            state, _ = self._select_state(request)
             raw_actions = self._predict_raw(image, state, request.task)
             adapted_actions = self._adapter.adapt(raw_actions)
             generated_at = time.time_ns()
@@ -240,9 +328,7 @@ class SmolVLAPolicyProvider(PolicyProvider):
                 action_schema="vehicle.twist_chunk.v1",
                 generated_at_ns=generated_at,
                 valid_until_ns=(
-                    generated_at
-                    + self._control_period_ns * len(adapted_actions)
-                    + self._response_margin_ns
+                    generated_at + self._control_period_ns * len(adapted_actions) + self._response_margin_ns
                 ),
                 control_period_ns=self._control_period_ns,
             )
@@ -257,5 +343,32 @@ class SmolVLAPolicyProvider(PolicyProvider):
                 flush=True,
             )
             return response
+        finally:
+            self._predict_lock.release()
+
+    def debug(self, request, protocol):
+        if not self._ready:
+            raise RuntimeError(self._status_message)
+        stage = request.stage.strip().lower()
+        if stage not in ("preprocess", "inference"):
+            raise ValueError(f"unsupported debug stage: {request.stage}")
+        observation = request.observation
+        if observation.schema_version != "vehicle.observation.v1":
+            raise ValueError(f"unsupported observation schema: {observation.schema_version}")
+        if not observation.task.strip():
+            raise ValueError("task is empty")
+        if not self._predict_lock.acquire(blocking=False):
+            raise RuntimeError("SmolVLA provider is busy")
+        try:
+            result, processed_image = self._debug_result(observation, stage)
+            result["debug_run_id"] = request.debug_run_id
+            return protocol.DebugResponse(
+                debug_run_id=request.debug_run_id,
+                provider_id=self.provider_id,
+                model_id=self.model_id,
+                schema_version="vehicle.vla.debug.v1",
+                result_json=json.dumps(result, ensure_ascii=False, separators=(",", ":")),
+                processed_image_jpeg=processed_image,
+            )
         finally:
             self._predict_lock.release()

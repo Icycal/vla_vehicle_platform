@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>vehicle_vla_debug</name>
+  <version>0.1.0</version>
+  <description>Shadow-only C++ VLA pipeline snapshot and single-step debug orchestrator.</description>
+  <maintainer email="guyahuiguyahui@qq.com">guyahui</maintainer>
+  <license>Proprietary</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>geometry_msgs</depend>
+  <depend>nlohmann_json</depend>
+  <depend>rclcpp</depend>
+  <depend>vehicle_interfaces</depend>
+  <depend>vehicle_policy_transport</depend>
+
+  <export><build_type>ament_cmake</build_type></export>
+</package>

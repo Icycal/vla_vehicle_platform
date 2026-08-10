@@ -22,6 +22,10 @@ public:
   std::string model_id() const override;
   std::string status_message() const override;
   PolicyPrediction predict(const PolicyObservationInput & observation) override;
+  PolicyDebugResult debug(
+    const PolicyObservationInput & observation,
+    const std::string & run_id,
+    const std::string & stage) override;
 
 private:
   std::size_t horizon_;

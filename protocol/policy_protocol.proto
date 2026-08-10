@@ -56,6 +56,21 @@ message PredictResponse {
   repeated TwistAction actions = 9;
 }
 
+
+message DebugRequest {
+  string debug_run_id = 1;
+  string stage = 2;
+  PredictRequest observation = 3;
+}
+
+message DebugResponse {
+  string debug_run_id = 1;
+  string provider_id = 2;
+  string model_id = 3;
+  string schema_version = 4;
+  string result_json = 5;
+  bytes processed_image_jpeg = 6;
+}
 message ErrorResponse {
   string code = 1;
   string message = 2;
@@ -71,5 +86,7 @@ message Envelope {
     PredictRequest predict_request = 12;
     PredictResponse predict_response = 13;
     ErrorResponse error_response = 14;
+    DebugRequest debug_request = 15;
+    DebugResponse debug_response = 16;
   }
 }

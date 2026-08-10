@@ -733,8 +733,10 @@ x86 CUDA Profile 用于正式 Fine-tune。两者从 Dataset Manifest 动态生�
 为降低 Phase 1 的实车开发和数据操作成本，先于完整用户界面实现独立 `vehicle_ops_console`。
 C++ ROS 2 API 只聚合稳定 Topic 并调用白名单 Service，浏览器通过 HTTP 访问，不直接连接 ROS、
 底盘串口或 Policy Provider 私有接口。第一版覆盖状态、相机、Episode、任务、Shadow 指标和
-Safe Stop；数据工具只生成受控命令，不开放任意 Shell。完整手机 App、Control Lease 和云端认证
-仍保留在阶段 3--4。
+Safe Stop；数据工具只生成受控命令，不开放任意 Shell。2026-08-10 又加入 VLA Pipeline Inspector：
+冻结单帧 Observation，分别执行预处理和一次显式推理，展示完整 raw/denormalized Action Chunk、
+Twist 解释和延迟，同时保持 `publishes_control=false`。调试协议位于 Policy Transport 层，未来替换
+OpenVLA 或其他 Provider 时不修改 ROS/UI 契约。完整手机 App、Control Lease 和云端认证仍保留在阶段 3--4。
 
 ### 阶段 2：低速闭环
 

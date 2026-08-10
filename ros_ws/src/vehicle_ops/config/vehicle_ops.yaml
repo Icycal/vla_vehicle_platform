@@ -5,6 +5,7 @@ vehicle_ops_api:
     request_limit_bytes: 1048576
     service_timeout_seconds: 2.0
     stale_after_seconds: 3.0
+    debug_timeout_seconds: 45.0
     operator_token: ""
     project_root: /home/wheeltec/vla_vehicle_platform
     jobs_root: /home/wheeltec/vla_vehicle_platform/run/ops/jobs

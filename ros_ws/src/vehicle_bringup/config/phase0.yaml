@@ -33,3 +33,8 @@ vla_safety_guard:
     obstacle_half_angle: 0.52
     require_scan: false
     publish_frequency: 20.0
+vla_debug_orchestrator:
+  ros__parameters:
+    transport: mock
+    socket_path: "/home/wheeltec/vla_vehicle_platform/run/policy/policy.sock"
+    transport_timeout: 1.0

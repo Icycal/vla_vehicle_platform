@@ -12,6 +12,7 @@ services:
       POLICY_PROVIDER: smolvla
       POLICY_OPERATION_MODE: shadow
       POLICY_SOCKET_PATH: /run/vla-policy/policy.sock
+      PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: "python"
       POLICY_HEALTH_TIMEOUT: "1.0"
       POLICY_FAIL_FAST: "1"
       HF_HUB_OFFLINE: "1"

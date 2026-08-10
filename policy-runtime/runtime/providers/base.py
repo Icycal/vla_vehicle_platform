@@ -1,4 +1,4 @@
-from abc import ABC, abstractmethod
+﻿from abc import ABC, abstractmethod
 
 
 class PolicyProvider(ABC):
@@ -31,3 +31,6 @@ class PolicyProvider(ABC):
     @abstractmethod
     def predict(self, request, protocol):
         raise NotImplementedError
+
+    def debug(self, request, protocol):
+        raise NotImplementedError(f"provider {self.provider_id} does not support debug requests")

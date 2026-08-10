@@ -7,7 +7,7 @@ Vehicle Ops Console 是新工程内独立实现的内部运维调试工具，不
 - C++17 ROS 2 节点 `vehicle_ops_api`：订阅统一状态 Topic，调用白名单 Service，并提供轻量 HTTP API；
 - 完全离线的响应式 Web 页面：不依赖 npm、CDN、rosbridge 或宿主机 Python Web 环境。
 
-浏览器不直接连接 ROS 2，不访问底盘串口，也不能发布最终 `/cmd_vel`。当前版本允许任务文本、Episode Start/Stop、Safe Stop，以及严格白名单化的工程 Job。它不提供任意 Shell、Topic 或 Service 入口。
+浏览器不直接连接 ROS 2，不访问底盘串口，也不能发布最终 `/cmd_vel`。当前版本允许任务文本、Episode Start/Stop、Safe Stop、VLA Shadow 单步调试，以及严格白名单化的工程 Job。它不提供任意 Shell、Topic 或 Service 入口。
 
 ## 构建
 
@@ -60,10 +60,11 @@ http://10.101.70.232:8088
 
 ## 页面功能
 
-控制台将功能拆分为三个顶部视图，避免所有表单和状态堆叠在同一长页面：
+控制台将功能拆分为四个顶部视图，避免所有表单和状态堆叠在同一长页面：
 
 - **实时监控**：控制模式、四项核心状态、前视相机、链路健康和 Shadow 指标；
 - **数据采集**：Episode Start/Stop、任务文本和 Safe Stop；
+- **VLA 调试**：冻结当前 Observation、仅预处理、单次推理、原始 Action Tensor 和 Twist 解释；
 - **工程工具**：受控任务中心、最近任务历史、日志查看、任务取消和调试命令预览。
 
 切换视图不会启动或停止任何 ROS 节点，也不会丢失当前浏览器会话中的 Operator Token。
@@ -92,6 +93,11 @@ API 保存最近一帧 `/camera/image_compressed`，浏览器定期请求：
 
 这不是额外的视频编码服务，不会复制完整视频流，只用于内部状态确认。没有相机 Topic 时页面保持占位状态。
 
+### VLA 单步调试
+
+VLA 调试页只在 `MODE_VLA_SHADOW` 和车辆静止时工作。它先冻结一份 `/vla/observation`，再由用户显式选择“仅预处理”或“单次推理”。页面显示原始/处理后图像、Tensor 元数据、完整 normalized Action Chunk、反归一化动作、Twist 解释和分阶段延迟。
+
+所有工件保存在 `run/ops/debug/<run-id>/`。该链路不发布 `/cmd_vel`；默认 `smolvla-shadow-zero-v1` 适配器仍把动作映射为零 Twist。完整说明见 `docs/VLA_PIPELINE_INSPECTOR.md`。
 ### Episode
 
 填写可选 Episode ID、任务描述和操作员后点击“开始记录”。页面调用：
@@ -161,6 +167,10 @@ ssh -L 8088:127.0.0.1:8088 wheeltec@10.101.70.232
 | POST | `/api/episode/start` | 是 | 调用 Episode Start Service |
 | POST | `/api/episode/stop` | 是 | 调用 Episode Stop Service |
 | POST | `/api/safe-stop` | 是 | 请求 Supervisor Safe Stop |
+| POST | `/api/vla-debug/capture` | 是 | 冻结当前 Observation |
+| POST | `/api/vla-debug/run` | 是 | 执行预处理或一次 Shadow 推理 |
+| GET | `/api/vla-debug/runs/<run-id>/original.jpg` | 是 | 获取冻结的原始图像 |
+| GET | `/api/vla-debug/runs/<run-id>/processed.jpg` | 是 | 获取 Provider 处理后图像 |
 | POST | `/api/jobs` | 是 | 提交白名单工程任务 |
 | GET | `/api/jobs` | 是 | 查询最近任务 |
 | GET | `/api/jobs/<job-id>` | 是 | 查询任务状态 |

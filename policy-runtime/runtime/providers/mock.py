@@ -1,3 +1,4 @@
+import json
 import os
 import threading
 import time
@@ -54,3 +55,48 @@ class MockPolicyProvider(PolicyProvider):
         for _ in range(self._horizon):
             response.actions.add(linear_x=linear_velocity, angular_z=angular_velocity)
         return response
+    def debug(self, request, protocol):
+        stage = request.stage.strip().lower()
+        if stage not in ("preprocess", "inference"):
+            raise ValueError(f"unsupported debug stage: {request.stage}")
+        observation = request.observation
+        result = {
+            "schema_version": "vehicle.vla.debug.v1",
+            "debug_run_id": request.debug_run_id,
+            "stage": stage,
+            "provider_id": self.provider_id,
+            "model_id": self.model_id,
+            "observation": {
+                "observation_id": observation.observation_id,
+                "task": observation.task,
+                "image_count": len(observation.images),
+                "state": [
+                    {"key": item.key, "value": item.value, "valid": item.valid}
+                    for item in observation.state
+                ],
+            },
+            "preprocessing": {"mock": True},
+            "latency_ms": {"preprocessing": 0.0, "total": 0.0},
+            "safety": {"operation_mode": "shadow", "publishes_control": False},
+        }
+        if stage == "inference":
+            values = [[0.0, 0.0] for _ in range(self._horizon)]
+            result["raw_output"] = {
+                "normalized_action_chunk": {"shape": [1, self._horizon, 2], "dtype": "float32", "values": values},
+                "denormalized_actions": {"shape": [self._horizon, 2], "values": values},
+            }
+            result["interpreted_output"] = {
+                "adapter_id": "mock-zero-v1",
+                "twist_actions": [
+                    {"linear_x": self._linear_velocity, "angular_z": self._angular_velocity}
+                    for _ in range(self._horizon)
+                ],
+            }
+            result["latency_ms"]["inference"] = 0.0
+        return protocol.DebugResponse(
+            debug_run_id=request.debug_run_id,
+            provider_id=self.provider_id,
+            model_id=self.model_id,
+            schema_version="vehicle.vla.debug.v1",
+            result_json=json.dumps(result, separators=(",", ":")),
+        )

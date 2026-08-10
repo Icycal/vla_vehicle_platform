@@ -1,0 +1,7 @@
+string task_override
+---
+bool accepted
+string run_id
+string directory
+string observation_json
+string message

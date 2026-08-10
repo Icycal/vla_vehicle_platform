@@ -43,4 +43,23 @@ PolicyPrediction MockPolicyTransport::predict(const PolicyObservationInput & obs
   return prediction;
 }
 
+PolicyDebugResult MockPolicyTransport::debug(
+  const PolicyObservationInput & observation,
+  const std::string & run_id,
+  const std::string & stage)
+{
+  if (stage != "preprocess" && stage != "inference") {
+    throw std::runtime_error("unsupported debug stage");
+  }
+  PolicyDebugResult result;
+  result.run_id = run_id;
+  result.provider_id = provider_id();
+  result.model_id = model_id();
+  result.schema_version = "vehicle.vla.debug.v1";
+  result.result_json = "{\"schema_version\":\"vehicle.vla.debug.v1\",\"debug_run_id\":\"" +
+    run_id + "\",\"stage\":\"" + stage + "\",\"provider_id\":\"mock\",\"model_id\":\"" +
+    model_id() + "\",\"observation\":{\"observation_id\":\"" + observation.observation_id +
+    "\"},\"safety\":{\"operation_mode\":\"shadow\",\"publishes_control\":false}}";
+  return result;
+}
 }  // namespace vehicle_policy_transport

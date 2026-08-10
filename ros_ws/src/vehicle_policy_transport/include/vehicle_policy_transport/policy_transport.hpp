@@ -39,6 +39,15 @@ struct PolicyPrediction
   std::vector<geometry_msgs::msg::Twist> actions;
 };
 
+struct PolicyDebugResult
+{
+  std::string run_id;
+  std::string provider_id;
+  std::string model_id;
+  std::string schema_version;
+  std::string result_json;
+  std::vector<uint8_t> processed_image_jpeg;
+};
 class PolicyTransport
 {
 public:
@@ -49,6 +58,10 @@ public:
   virtual std::string model_id() const = 0;
   virtual std::string status_message() const = 0;
   virtual PolicyPrediction predict(const PolicyObservationInput & observation) = 0;
+  virtual PolicyDebugResult debug(
+    const PolicyObservationInput & observation,
+    const std::string & run_id,
+    const std::string & stage) = 0;
 };
 
 }  // namespace vehicle_policy_transport

@@ -26,6 +26,11 @@
     <param from="$(var shadow_params)"/>
   </node>
 
+  <node pkg="vehicle_vla_debug" exec="vla_debug_orchestrator"
+        name="vla_debug_orchestrator" output="screen">
+    <param from="$(var policy_params_file)"/>
+    <param from="$(var shadow_params)"/>
+  </node>
   <node pkg="vehicle_data" exec="shadow_evaluator"
         name="shadow_evaluator" output="screen">
     <param from="$(var shadow_params)"/>

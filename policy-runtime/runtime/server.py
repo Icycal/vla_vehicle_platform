@@ -76,6 +76,9 @@ def _handle_request(request: protocol.Envelope, provider) -> protocol.Envelope:
     if payload == "predict_request":
         response.predict_response.CopyFrom(provider.predict(request.predict_request, protocol))
         return response
+    if payload == "debug_request":
+        response.debug_response.CopyFrom(provider.debug(request.debug_request, protocol))
+        return response
     return _error_envelope(request.message_id, "INVALID_REQUEST", "unsupported or missing payload")
 
 

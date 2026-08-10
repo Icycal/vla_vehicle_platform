@@ -1,5 +1,5 @@
 const $ = (id) => document.getElementById(id);
-const state = { token: sessionStorage.getItem("vehicleOpsToken") || "", cameraTick: 0, selectedJobId: "", jobs: [] };
+const state = { token: sessionStorage.getItem("vehicleOpsToken") || "", cameraTick: 0, selectedJobId: "", jobs: [], debugRunId: "", debugResult: null, debugImageUrls: {} };
 const text = (id, value) => { $(id).textContent = value ?? "—"; };
 const number = (value, digits = 1) => Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : "--";
 function toast(message, error = false) {
@@ -255,8 +255,114 @@ $("cancelJob").addEventListener("click", async () => {
     await refreshJobs(true);
   } catch (error) { toast(error.message, true); }
 });
+function setDebugBusy(busy) {
+  $("captureDebug").disabled = busy;
+  $("preprocessDebug").disabled = busy || !state.debugRunId;
+  $("inferenceDebug").disabled = busy || !state.debugRunId;
+}
+function setDebugStage(stage, label, stateClass = "running") {
+  ["Capture", "Preprocess", "Inference"].forEach((name) => {
+    $("debugStep" + name).classList.toggle("active", name.toLowerCase() === stage);
+  });
+  $("debugStageState").className = `job-state ${stateClass}`;
+  $("debugStageState").textContent = label;
+}
+async function loadDebugImage(kind, imageId, emptyId) {
+  if (!state.debugRunId) return;
+  const response = await fetch(`/api/vla-debug/runs/${encodeURIComponent(state.debugRunId)}/${kind}.jpg`, {
+    cache: "no-store", headers: { "X-Ops-Token": state.token }
+  });
+  if (!response.ok) return;
+  if (state.debugImageUrls[kind]) URL.revokeObjectURL(state.debugImageUrls[kind]);
+  state.debugImageUrls[kind] = URL.createObjectURL(await response.blob());
+  $(imageId).src = state.debugImageUrls[kind];
+  $(imageId).style.display = "block";
+  $(emptyId).style.display = "none";
+}
+function renderDebugResult(result) {
+  state.debugResult = result;
+  $("debugJson").textContent = JSON.stringify(result, null, 2);
+  $("copyDebugJson").disabled = false;
+  text("debugProvider", `${result.provider_id || "--"} / ${result.model_id || "--"}`);
+  text("debugLatency", `${number(result.latency_ms?.total, 1)} ms`);
+  const normalized = result.raw_output?.normalized_action_chunk;
+  const denormalized = result.raw_output?.denormalized_actions?.values || [];
+  const interpreted = result.interpreted_output?.twist_actions || [];
+  text("debugActionShape", normalized?.shape ? `Shape ${normalized.shape.join(" × ")}` : "Shape --");
+  const body = $("debugActionRows");
+  body.replaceChildren();
+  const normalizedValues = normalized?.values || [];
+  const count = Math.max(normalizedValues.length, denormalized.length, interpreted.length);
+  if (!count) {
+    const row = body.insertRow();
+    const cell = row.insertCell(); cell.colSpan = 4;
+    cell.textContent = result.stage === "preprocess" ? "预处理完成；该阶段不会运行模型。" : "没有动作输出。";
+    return;
+  }
+  for (let index = 0; index < count; index++) {
+    const row = body.insertRow();
+    row.insertCell().textContent = index;
+    const raw = row.insertCell();
+    const normalizedLine = document.createElement("code");
+    const denormalizedLine = document.createElement("code");
+    normalizedLine.textContent = `N ${JSON.stringify(normalizedValues[index] || [])}`;
+    denormalizedLine.textContent = denormalized[index]
+      ? `D ${JSON.stringify(denormalized[index])}`
+      : "D — 仅原始输出（超出执行预览窗口）";
+    raw.append(normalizedLine, denormalizedLine);
+    row.insertCell().textContent = number(interpreted[index]?.linear_x, 6);
+    row.insertCell().textContent = number(interpreted[index]?.angular_z, 6);
+  }
+}
+async function captureDebugObservation() {
+  if (!state.token) { openToken(); throw new Error("请先填写操作令牌"); }
+  setDebugBusy(true); setDebugStage("capture", "采集中");
+  try {
+    const result = await jobFetch("/api/vla-debug/capture", {
+      method: "POST", headers: { "Content-Type": "text/plain;charset=UTF-8" },
+      body: $("debugTask").value.trim()
+    });
+    state.debugRunId = result.run_id;
+    text("debugRunId", result.run_id);
+    $("debugJson").textContent = JSON.stringify(result.observation, null, 2);
+    $("copyDebugJson").disabled = false;
+    $("debugActionRows").innerHTML = '<tr><td colspan="4">输入已冻结，可以执行预处理或单次推理。</td></tr>';
+    await loadDebugImage("original", "debugOriginalImage", "debugOriginalEmpty");
+    setDebugStage("capture", "输入已冻结", "succeeded");
+    toast(result.message);
+  } finally { setDebugBusy(false); }
+}
+async function runDebugStage(stage) {
+  if (!state.debugRunId) throw new Error("请先采集当前帧");
+  setDebugBusy(true);
+  setDebugStage(stage, stage === "preprocess" ? "预处理中" : "推理中");
+  try {
+    const response = await jobFetch("/api/vla-debug/run", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ run_id: state.debugRunId, stage })
+    });
+    renderDebugResult(response.result);
+    await loadDebugImage("processed", "debugProcessedImage", "debugProcessedEmpty");
+    setDebugStage(stage, stage === "preprocess" ? "预处理完成" : "推理完成", "succeeded");
+    toast(response.message);
+  } finally { setDebugBusy(false); }
+}
+$("captureDebug").addEventListener("click", async () => {
+  try { await captureDebugObservation(); } catch (error) { setDebugStage("capture", "执行失败", "failed"); toast(error.message, true); setDebugBusy(false); }
+});
+$("preprocessDebug").addEventListener("click", async () => {
+  try { await runDebugStage("preprocess"); } catch (error) { setDebugStage("preprocess", "执行失败", "failed"); toast(error.message, true); setDebugBusy(false); }
+});
+$("inferenceDebug").addEventListener("click", async () => {
+  if (!confirm("确认执行一次 VLA 推理？结果只用于 Shadow 调试，不会发布控制命令。")) return;
+  try { await runDebugStage("inference"); } catch (error) { setDebugStage("inference", "执行失败", "failed"); toast(error.message, true); setDebugBusy(false); }
+});
+$("copyDebugJson").addEventListener("click", async () => {
+  try { await navigator.clipboard.writeText($("debugJson").textContent); toast("调试 JSON 已复制"); }
+  catch { toast("浏览器禁止剪贴板访问，请手动复制", true); }
+});
 updateCommand();
-setView(["monitor", "capture", "tools"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "monitor");
+setView(["monitor", "capture", "debug", "tools"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "monitor");
 refresh();
 refreshJobs();
 setInterval(refresh, 1000);

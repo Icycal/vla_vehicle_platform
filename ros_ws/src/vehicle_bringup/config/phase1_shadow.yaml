@@ -29,3 +29,14 @@ episode_recorder:
     max_episode_duration: 900.0
     image_record_frequency: 5.0
     require_observation_ready: true
+vla_debug_orchestrator:
+  ros__parameters:
+    artifact_root: "/home/wheeltec/vla_vehicle_platform/run/ops/debug"
+    observation_timeout: 1.0
+    command_timeout: 0.5
+    stationary_linear_threshold: 0.02
+    stationary_angular_threshold: 0.05
+    require_shadow_mode: true
+    provider_busy_retry_count: 5
+    provider_busy_retry_delay_ms: 350
+    max_snapshots: 20

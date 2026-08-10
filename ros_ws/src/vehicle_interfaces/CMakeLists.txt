@@ -21,6 +21,8 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   msg/ShadowMetrics.msg
   msg/SystemState.msg
   msg/TeleopCommand.msg
+  srv/CaptureVlaDebug.srv
+  srv/RunVlaDebug.srv
   srv/RequestControlMode.srv
   srv/RequestSafeStop.srv
   srv/StartEpisode.srv

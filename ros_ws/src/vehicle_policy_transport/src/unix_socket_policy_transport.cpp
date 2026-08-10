@@ -115,6 +115,30 @@ vla::policy::v1::Envelope transact(
   return response;
 }
 
+void populate_observation(
+  vla::policy::v1::PredictRequest * target,
+  const PolicyObservationInput & observation)
+{
+  target->set_observation_id(observation.observation_id);
+  target->set_schema_version(observation.schema_version);
+  target->set_task(observation.task);
+  target->set_generated_at_ns(observation.generated_at_ns);
+  target->set_valid_until_ns(observation.valid_until_ns);
+  for (const auto & image : observation.images) {
+    auto * output = target->add_images();
+    output->set_key(image.key);
+    output->set_format(image.format);
+    output->set_data(image.data.data(), image.data.size());
+  }
+  const auto state_count = std::min({
+    observation.state_keys.size(), observation.state.size(), observation.state_valid.size()});
+  for (std::size_t index = 0; index < state_count; ++index) {
+    auto * output = target->add_state();
+    output->set_key(observation.state_keys[index]);
+    output->set_value(observation.state[index]);
+    output->set_valid(observation.state_valid[index]);
+  }
+}
 }  // namespace
 
 UnixSocketPolicyTransport::UnixSocketPolicyTransport(
@@ -177,26 +201,7 @@ PolicyPrediction UnixSocketPolicyTransport::predict(const PolicyObservationInput
     vla::policy::v1::Envelope request;
     request.set_protocol_version(kProtocolVersion);
     request.set_message_id(observation.observation_id);
-    auto * predict_request = request.mutable_predict_request();
-    predict_request->set_observation_id(observation.observation_id);
-    predict_request->set_schema_version(observation.schema_version);
-    predict_request->set_task(observation.task);
-    predict_request->set_generated_at_ns(observation.generated_at_ns);
-    predict_request->set_valid_until_ns(observation.valid_until_ns);
-    for (const auto & image : observation.images) {
-      auto * target = predict_request->add_images();
-      target->set_key(image.key);
-      target->set_format(image.format);
-      target->set_data(image.data.data(), image.data.size());
-    }
-    const auto state_count = std::min({
-      observation.state_keys.size(), observation.state.size(), observation.state_valid.size()});
-    for (std::size_t index = 0; index < state_count; ++index) {
-      auto * target = predict_request->add_state();
-      target->set_key(observation.state_keys[index]);
-      target->set_value(observation.state[index]);
-      target->set_valid(observation.state_valid[index]);
-    }
+    populate_observation(request.mutable_predict_request(), observation);
 
     const auto response = transact(socket_path_, timeout_, request);
     if (!response.has_predict_response()) {
@@ -235,4 +240,41 @@ PolicyPrediction UnixSocketPolicyTransport::predict(const PolicyObservationInput
   }
 }
 
+PolicyDebugResult UnixSocketPolicyTransport::debug(
+  const PolicyObservationInput & observation,
+  const std::string & run_id,
+  const std::string & stage)
+{
+  try {
+    vla::policy::v1::Envelope request;
+    request.set_protocol_version(kProtocolVersion);
+    request.set_message_id(run_id);
+    auto * debug_request = request.mutable_debug_request();
+    debug_request->set_debug_run_id(run_id);
+    debug_request->set_stage(stage);
+    populate_observation(debug_request->mutable_observation(), observation);
+
+    const auto response = transact(socket_path_, timeout_, request);
+    if (!response.has_debug_response()) {
+      throw std::runtime_error("missing debug response");
+    }
+    const auto & source = response.debug_response();
+    if (source.debug_run_id() != run_id) {
+      throw std::runtime_error("policy debug response run ID mismatch");
+    }
+    PolicyDebugResult result;
+    result.run_id = source.debug_run_id();
+    result.provider_id = source.provider_id();
+    result.model_id = source.model_id();
+    result.schema_version = source.schema_version();
+    result.result_json = source.result_json();
+    result.processed_image_jpeg.assign(
+      source.processed_image_jpeg().begin(), source.processed_image_jpeg().end());
+    return result;
+  } catch (const std::exception & error) {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    status_message_ = error.what();
+    throw;
+  }
+}
 }  // namespace vehicle_policy_transport

@@ -1,0 +1,7 @@
+string run_id
+string stage
+---
+bool accepted
+string result_json
+string processed_image_path
+string message

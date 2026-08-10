@@ -14,6 +14,9 @@
 #include <vehicle_interfaces/srv/request_safe_stop.hpp>
 #include <vehicle_interfaces/srv/start_episode.hpp>
 #include <vehicle_interfaces/srv/stop_episode.hpp>
+#include <vehicle_interfaces/srv/capture_vla_debug.hpp>
+#include <vehicle_interfaces/srv/run_vla_debug.hpp>
+#include <nlohmann/json.hpp>
 #include "job_manager.hpp"
 #include <algorithm>
 #include <atomic>
@@ -211,12 +214,15 @@ private:
   HttpResponse job_get(const std::string & job_id);
   HttpResponse job_log(const std::string & job_id);
   HttpResponse job_cancel(const std::string & job_id);
+  HttpResponse debug_capture(const std::string & body);
+  HttpResponse debug_run(const std::string & body);
+  HttpResponse debug_image(const std::string & run_id, const std::string & image_name);
   std::string status_json();
   static HttpResponse success(const std::string & message, const std::string & extra = "");
   static HttpResponse error(int status, const std::string & message);
   std::string bind_, token_, web_root_, project_root_, jobs_root_;
   int port_{8088}, limit_{1048576};
-  double service_seconds_{2.0}, stale_seconds_{3.0};
+  double service_seconds_{2.0}, stale_seconds_{3.0}, debug_timeout_seconds_{45.0};
   std::atomic<bool> running_{false};
   int server_{-1};
   std::thread thread_;
@@ -241,6 +247,8 @@ private:
   rclcpp::Client<vehicle_interfaces::srv::StartEpisode>::SharedPtr start_client_;
   rclcpp::Client<vehicle_interfaces::srv::StopEpisode>::SharedPtr stop_client_;
   rclcpp::Client<vehicle_interfaces::srv::RequestSafeStop>::SharedPtr safe_client_;
+  rclcpp::Client<vehicle_interfaces::srv::CaptureVlaDebug>::SharedPtr debug_capture_client_;
+  rclcpp::Client<vehicle_interfaces::srv::RunVlaDebug>::SharedPtr debug_run_client_;
 };
 VehicleOpsApi::VehicleOpsApi() : Node("vehicle_ops_api")
 {
@@ -249,6 +257,7 @@ VehicleOpsApi::VehicleOpsApi() : Node("vehicle_ops_api")
   limit_ = declare_parameter<int>("request_limit_bytes", 1048576);
   service_seconds_ = declare_parameter<double>("service_timeout_seconds", 2.0);
   stale_seconds_ = declare_parameter<double>("stale_after_seconds", 3.0);
+  debug_timeout_seconds_ = declare_parameter<double>("debug_timeout_seconds", 45.0);
   token_ = declare_parameter<std::string>("operator_token", "");
   web_root_ = declare_parameter<std::string>("web_root", "");
   project_root_ = declare_parameter<std::string>("project_root", "/home/wheeltec/vla_vehicle_platform");
@@ -279,6 +288,8 @@ VehicleOpsApi::VehicleOpsApi() : Node("vehicle_ops_api")
   start_client_ = create_client<vehicle_interfaces::srv::StartEpisode>("/vehicle/start_episode");
   stop_client_ = create_client<vehicle_interfaces::srv::StopEpisode>("/vehicle/stop_episode");
   safe_client_ = create_client<vehicle_interfaces::srv::RequestSafeStop>("/vehicle/request_safe_stop");
+  debug_capture_client_ = create_client<vehicle_interfaces::srv::CaptureVlaDebug>("/vla/debug/capture");
+  debug_run_client_ = create_client<vehicle_interfaces::srv::RunVlaDebug>("/vla/debug/run");
   jobs_ = std::make_unique<vehicle_ops::JobManager>(project_root_, jobs_root_);
   start_server();
   RCLCPP_INFO(get_logger(), "Vehicle Ops listening on http://%s:%d", bind_.c_str(), port_);
@@ -393,6 +404,25 @@ HttpResponse VehicleOpsApi::route(const HttpRequest & request)
     return {200, "application/json; charset=utf-8", status_json(), {{"Cache-Control", "no-store"}}};
   }
   if (request.method == "GET" && path == "/api/camera/front.jpg") {return camera();}
+  if (path.rfind("/api/vla-debug/", 0) == 0) {
+    const auto denied = authorize(request);
+    if (denied) {return *denied;}
+    if (request.method == "POST" && path == "/api/vla-debug/capture") {
+      return debug_capture(request.body);
+    }
+    if (request.method == "POST" && path == "/api/vla-debug/run") {
+      return debug_run(request.body);
+    }
+    const std::string prefix = "/api/vla-debug/runs/";
+    if (request.method == "GET" && path.rfind(prefix, 0) == 0) {
+      const auto remainder = path.substr(prefix.size());
+      const auto separator = remainder.find('/');
+      if (separator != std::string::npos) {
+        return debug_image(remainder.substr(0, separator), remainder.substr(separator + 1));
+      }
+    }
+    return error(405, "Unsupported VLA debug endpoint");
+  }
   if (path == "/api/jobs" || path.rfind("/api/jobs/", 0) == 0) {
     const auto denied = authorize(request);
     if (denied) {return *denied;}
@@ -501,6 +531,67 @@ HttpResponse VehicleOpsApi::safe_stop(const std::string & body)
   }
   const auto response = future.get();
   return response->accepted ? success(response->message) : error(400, response->message);
+}
+HttpResponse VehicleOpsApi::debug_capture(const std::string & body)
+{
+  if (!debug_capture_client_->wait_for_service(250ms)) {
+    return error(503, "VLA Debug Orchestrator is unavailable");
+  }
+  auto request = std::make_shared<vehicle_interfaces::srv::CaptureVlaDebug::Request>();
+  request->task_override = trim(body);
+  auto future = debug_capture_client_->async_send_request(request);
+  if (future.wait_for(std::chrono::milliseconds(static_cast<int>(service_seconds_ * 1000))) !=
+    std::future_status::ready)
+  {
+    return error(408, "VLA debug capture timed out");
+  }
+  const auto response = future.get();
+  if (!response->accepted) {return error(400, response->message);}
+  return success(response->message,
+    "\"run_id\":" + json_string(response->run_id) +
+    ",\"directory\":" + json_string(response->directory) +
+    ",\"observation\":" + response->observation_json);
+}
+HttpResponse VehicleOpsApi::debug_run(const std::string & body)
+{
+  if (!debug_run_client_->wait_for_service(250ms)) {
+    return error(503, "VLA Debug Orchestrator is unavailable");
+  }
+  nlohmann::json input;
+  try {input = nlohmann::json::parse(body);}
+  catch (const nlohmann::json::exception &) {return error(400, "Request body must be valid JSON");}
+  if (!input.contains("run_id") || !input.at("run_id").is_string() ||
+    !input.contains("stage") || !input.at("stage").is_string())
+  {
+    return error(400, "run_id and stage are required");
+  }
+  auto request = std::make_shared<vehicle_interfaces::srv::RunVlaDebug::Request>();
+  request->run_id = input.at("run_id").get<std::string>();
+  request->stage = input.at("stage").get<std::string>();
+  auto future = debug_run_client_->async_send_request(request);
+  if (future.wait_for(std::chrono::milliseconds(static_cast<int>(debug_timeout_seconds_ * 1000))) !=
+    std::future_status::ready)
+  {
+    return error(408, "VLA debug stage timed out");
+  }
+  const auto response = future.get();
+  if (!response->accepted) {return error(400, response->message);}
+  return success(response->message, "\"result\":" + response->result_json);
+}
+HttpResponse VehicleOpsApi::debug_image(
+  const std::string & run_id, const std::string & image_name)
+{
+  const bool valid_id = run_id.rfind("vla-debug-", 0) == 0 &&
+    std::all_of(run_id.begin(), run_id.end(), [](unsigned char value) {
+      return std::isalnum(value) || value == '-';
+    });
+  const std::string filename = image_name == "original.jpg" ? "camera-original.jpg" :
+    (image_name == "processed.jpg" ? "camera-processed.jpg" : "");
+  if (!valid_id || filename.empty()) {return error(404, "Debug image not found");}
+  const auto path = std::filesystem::path(project_root_) / "run/ops/debug" / run_id / filename;
+  try {
+    return {200, "image/jpeg", read_file(path), {{"Cache-Control", "no-store"}}};
+  } catch (const std::exception &) {return error(404, "Debug image not found");}
 }
 HttpResponse VehicleOpsApi::jobs_create(const std::string & body)
 {
