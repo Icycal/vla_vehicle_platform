@@ -736,7 +736,10 @@ C++ ROS 2 API 只聚合稳定 Topic 并调用白名单 Service，浏览器通过
 Safe Stop；数据工具只生成受控命令，不开放任意 Shell。2026-08-10 又加入 VLA Pipeline Inspector：
 冻结单帧 Observation，分别执行预处理和一次显式推理，展示完整 raw/denormalized Action Chunk、
 Twist 解释和延迟，同时保持 `publishes_control=false`。调试协议位于 Policy Transport 层，未来替换
-OpenVLA 或其他 Provider 时不修改 ROS/UI 契约。完整手机 App、Control Lease 和云端认证仍保留在阶段 3--4。
+OpenVLA 或其他 Provider 时不修改 ROS/UI 契约。2026-08-10 进一步增加独立 `pipeline_trace_aggregator`，
+被动汇总 Sensor、Observation、Policy、Action Runtime、Control Mux、Safety、Shadow 和 Episode 共 11 个阶段，
+通过 `/vla/pipeline_trace` 向 Ops Console 提供实时链路和最近 Trace；聚合节点不触发推理且不发布控制。
+完整手机 App、Control Lease 和云端认证仍保留在阶段 3--4。
 
 ### 阶段 2：低速闭环
 

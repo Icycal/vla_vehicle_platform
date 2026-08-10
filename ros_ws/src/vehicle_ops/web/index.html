@@ -4,31 +4,80 @@
 <section class="metrics-grid"><article class="metric"><span class="metric-icon cyan">◉</span><div><small>Observation</small><strong id="observationState">OFFLINE</strong><p id="observationMeta">尚未收到状态</p></div></article><article class="metric"><span class="metric-icon violet">✦</span><div><small>Policy Runtime</small><strong id="policyState">OFFLINE</strong><p id="policyMeta">等待 Provider</p></div></article><article class="metric"><span class="metric-icon lime">●</span><div><small>Episode</small><strong id="episodeState">IDLE</strong><p id="episodeMeta">未开始记录</p></div></article><article class="metric"><span class="metric-icon amber">⌁</span><div><small>Orin Memory</small><strong id="memoryState">--</strong><p id="hostMeta">系统指标载入中</p></div></article></section>
 <section class="view-panel active" id="view-monitor"><div class="monitor-grid"><article class="panel camera-card"><div class="section-heading"><div><p class="eyebrow">LIVE SENSOR</p><h2>前视相机</h2></div><span id="cameraBadge" class="pill neutral"><i></i>无画面</span></div><div class="camera-frame"><img id="cameraImage" alt="前视相机实时快照"><div id="cameraEmpty" class="camera-empty"><span>◎</span><p>等待 <code>/camera/image_compressed</code></p></div><div class="camera-reticle"></div></div><div class="camera-footer"><span id="cameraResolution">-- × --</span><span id="cameraAge">更新时间 --</span><span id="calibrationState">未标定</span></div></article><aside class="panel live-summary"><div class="section-heading"><div><p class="eyebrow">SYSTEM HEALTH</p><h2>链路状态</h2></div><span class="live-dot"></span></div><div class="health-list"><div><span>Supervisor</span><strong id="detailSupervisor">等待状态</strong></div><div><span>Observation</span><strong id="detailObservation">OFFLINE</strong></div><div><span>Policy</span><strong id="detailPolicy">OFFLINE</strong></div><div><span>Safety</span><strong id="safetyState">NO EVENT</strong></div></div><div class="shadow-box"><p class="eyebrow">SHADOW QUALITY</p><div class="shadow-grid"><div><small>Samples</small><strong id="shadowSamples">0</strong></div><div><small>Linear MAE</small><strong id="linearMae">--</strong></div><div><small>Angular MAE</small><strong id="angularMae">--</strong></div></div></div><div class="summary-actions"><button class="button primary" data-open-view="capture">开始数据采集</button><button class="button secondary" data-open-view="tools">打开工程工具</button></div></aside></div></section>
 <section class="view-panel" id="view-capture"><div class="capture-grid"><article class="panel control-card"><div class="section-heading"><div><p class="eyebrow">DATA CAPTURE</p><h2>Episode 记录</h2></div><span id="recordDot" class="record-dot"></span></div><form id="episodeForm" class="stack-form"><div class="field-row"><label>Episode ID<input id="episodeId" placeholder="留空自动生成"></label><label>操作员<input id="operatorId" value="vehicle_ops_console"></label></div><label>任务描述<textarea id="episodeTask" rows="4" placeholder="例如：沿走廊低速前进并在障碍物前停车"></textarea></label><div class="button-row"><button class="button primary" type="submit">开始记录</button><button class="button secondary" type="button" id="stopEpisode">停止并封存</button></div></form><dl class="detail-list"><div><dt>Episode</dt><dd id="currentEpisode">—</dd></div><div><dt>持续时间</dt><dd id="episodeElapsed">0.0 s</dd></div><div><dt>消息 / 图像</dt><dd id="episodeCounts">0 / 0</dd></div></dl></article><div class="capture-side"><article class="panel action-card"><p class="eyebrow">VLA TASK</p><h2>任务输入</h2><p>发布到统一 <code>/vla/task</code>，不直接触发底盘控制。</p><form id="taskForm"><textarea id="taskText" rows="3" placeholder="输入新的自然语言任务"></textarea><button class="button primary" type="submit">发布任务</button></form></article><article class="panel action-card danger-card"><p class="eyebrow danger-text">SAFETY</p><h2>请求安全停车</h2><p>调用 Supervisor 白名单服务，系统切换到 <code>SAFE_STOP</code>。</p><input id="safeReason" value="Ops Console operator requested safe stop"><button class="button danger" id="safeStop">确认安全停车</button></article></div></div></section><section class="view-panel" id="view-debug">
-  <div class="debug-grid">
-    <article class="panel debug-controller">
-      <div class="section-heading"><div><p class="eyebrow">PIPELINE INSPECTOR</p><h2>VLA 单步调试</h2></div><span class="pill neutral" id="debugSafetyBadge"><i></i>SHADOW ONLY</span></div>
-      <p class="debug-intro">冻结一份当前 Observation，再独立执行预处理或单次推理。任何阶段都不会发布控制命令。</p>
-      <label>调试任务<textarea id="debugTask" rows="3" placeholder="例如：move forward and avoid obstacles">move forward and avoid obstacles</textarea></label>
-      <div class="debug-steps">
-        <div class="debug-step active" id="debugStepCapture"><span>1</span><strong>冻结输入</strong><small>相机与车辆状态</small></div>
-        <div class="debug-step" id="debugStepPreprocess"><span>2</span><strong>执行预处理</strong><small>Resize 与 Tensor</small></div>
-        <div class="debug-step" id="debugStepInference"><span>3</span><strong>单次推理</strong><small>原始 Action Chunk</small></div>
-      </div>
-      <div class="debug-buttons"><button class="button primary" id="captureDebug">采集当前帧</button><button class="button secondary" id="preprocessDebug" disabled>只执行预处理</button><button class="button secondary" id="inferenceDebug" disabled>执行单次推理</button></div>
-      <div class="debug-run-meta"><div><small>Debug Run</small><strong id="debugRunId">尚未创建</strong></div><div><small>Provider / Model</small><strong id="debugProvider">等待推理</strong></div><div><small>总耗时</small><strong id="debugLatency">-- ms</strong></div></div>
+  <div class="inspector-header">
+    <div><p class="eyebrow">VLA PIPELINE INSPECTOR</p><h2>整车链路调试台</h2><p>实时观察完整 Shadow 链路，或冻结同一 Observation 执行可复现的模型单步调试。</p></div>
+    <div class="inspector-mode-tabs" role="tablist" aria-label="调试模式">
+      <button class="inspector-mode active" data-inspector-mode="live" role="tab">实时链路</button>
+      <button class="inspector-mode" data-inspector-mode="snapshot" role="tab">快照单步</button>
+      <button class="inspector-mode" data-inspector-mode="history" role="tab">Trace 历史</button>
+    </div>
+  </div>
+
+  <div class="inspector-panel active" data-inspector-panel="live">
+    <article class="panel pipeline-overview">
+      <div class="section-heading"><div><p class="eyebrow">PASSIVE LIVE TRACE</p><h2>实时链路状态</h2></div><span id="pipelineLiveState" class="pill neutral"><i></i>等待 Trace</span></div>
+      <div class="pipeline-meta-strip"><div><small>Trace</small><strong id="pipelineTraceId">--</strong></div><div><small>Observation</small><strong id="pipelineObservationId">--</strong></div><div><small>Provider / Model</small><strong id="pipelineProvider">--</strong></div><div><small>更新时间</small><strong id="pipelineReceivedAge">--</strong></div></div>
+      <div class="pipeline-stage-rail" id="pipelineStageRail"><div class="pipeline-empty">等待 <code>/vla/pipeline_trace</code></div></div>
+      <p class="pipeline-passive-note">被动实时模式只读取现有 Topic，不会额外调用模型、发布控制命令或抢占 GPU。</p>
     </article>
-    <article class="panel debug-images">
-      <div class="section-heading"><div><p class="eyebrow">VISUAL INPUT</p><h2>图像对照</h2></div><span class="job-state neutral" id="debugStageState">未开始</span></div>
-      <div class="debug-image-grid"><figure><figcaption>原始相机帧</figcaption><div class="debug-image-frame"><img id="debugOriginalImage" alt="调试原始相机帧"><span id="debugOriginalEmpty">等待冻结 Observation</span></div></figure><figure><figcaption>模型处理后图像</figcaption><div class="debug-image-frame"><img id="debugProcessedImage" alt="模型处理后图像"><span id="debugProcessedEmpty">执行预处理后显示</span></div></figure></div>
-    </article>
-    <article class="panel debug-actions">
-      <div class="section-heading"><div><p class="eyebrow">RAW ACTION OUTPUT</p><h2>动作原始值</h2></div><span id="debugActionShape" class="job-state neutral">Shape --</span></div>
-      <div class="debug-table-wrap"><table class="debug-action-table"><thead><tr><th>Step</th><th>Raw / Denormalized</th><th>Linear X</th><th>Angular Z</th></tr></thead><tbody id="debugActionRows"><tr><td colspan="4">执行单次推理后显示完整 Action Chunk</td></tr></tbody></table></div>
-    </article>
-    <article class="panel debug-json-panel">
-      <div class="section-heading"><div><p class="eyebrow">DEBUG ENVELOPE</p><h2>完整调试结果</h2></div><button class="button ghost compact-button" id="copyDebugJson" disabled>复制 JSON</button></div>
-      <pre id="debugJson">等待采集当前 Observation。</pre>
-    </article>
+
+    <div class="pipeline-live-grid">
+      <article class="panel pipeline-visual-card">
+        <div class="section-heading"><div><p class="eyebrow">LIVE VISUAL</p><h2>输入画面对照</h2></div><span class="job-state neutral">PASSIVE</span></div>
+        <div class="debug-image-grid pipeline-images"><figure><figcaption>实时前视相机</figcaption><div class="debug-image-frame"><img id="pipelineLiveImage" alt="实时前视相机"><span id="pipelineLiveEmpty">等待相机图像</span></div></figure><figure><figcaption>最近一次模型处理图像</figcaption><div class="debug-image-frame"><img id="pipelineProcessedImage" alt="最近一次模型处理图像"><span id="pipelineProcessedEmpty">执行快照预处理后显示</span></div></figure></div>
+      </article>
+      <article class="panel pipeline-stage-detail">
+        <div class="section-heading"><div><p class="eyebrow">SELECTED STAGE</p><h2 id="pipelineStageLabel">选择一个阶段</h2></div><span id="pipelineStageStatus" class="job-state neutral">WAITING</span></div>
+        <p class="pipeline-component" id="pipelineStageComponent">点击上方阶段查看节点、输入、输出和错误原因。</p>
+        <div class="pipeline-detail-grid"><div><small>输入</small><strong id="pipelineStageInput">--</strong></div><div><small>输出</small><strong id="pipelineStageOutput">--</strong></div><div><small>延迟</small><strong id="pipelineStageLatency">--</strong></div><div><small>数据年龄</small><strong id="pipelineStageAge">--</strong></div></div>
+        <div class="pipeline-stage-message" id="pipelineStageMessage">等待实时 Trace。</div>
+        <pre id="pipelineStageDetail">{}</pre>
+      </article>
+      <article class="panel pipeline-flow-summary">
+        <div><small>Policy / Action</small><strong id="pipelineActionSummary">等待 PolicyAction</strong></div><div><small>Safety Boundary</small><strong id="pipelineSafetySummary">等待 Safety Guard</strong></div><div><small>Shadow Evaluation</small><strong id="pipelineShadowSummary">等待对比结果</strong></div>
+      </article>
+    </div>
+  </div>
+
+  <div class="inspector-panel" data-inspector-panel="snapshot">
+    <div class="debug-grid">
+      <article class="panel debug-controller">
+        <div class="section-heading"><div><p class="eyebrow">REPRODUCIBLE SNAPSHOT</p><h2>快照单步调试</h2></div><span class="pill neutral" id="debugSafetyBadge"><i></i>SHADOW ONLY</span></div>
+        <p class="debug-intro">冻结同一份 Observation，分别检查契约、预处理、推理、反归一化和动作解释。任何阶段都不会发布控制命令。</p>
+        <label>调试任务<textarea id="debugTask" rows="3" placeholder="例如：move forward and avoid obstacles">move forward and avoid obstacles</textarea></label>
+        <div class="debug-steps debug-steps-expanded">
+          <div class="debug-step active" id="debugStepCapture"><span>1</span><strong>冻结输入</strong><small>相机与车辆状态</small></div>
+          <div class="debug-step" id="debugStepContract"><span>2</span><strong>契约检查</strong><small>Schema 与有效性</small></div>
+          <div class="debug-step" id="debugStepPreprocess"><span>3</span><strong>模型预处理</strong><small>Decode / Resize / Tensor</small></div>
+          <div class="debug-step" id="debugStepInference"><span>4</span><strong>模型推理</strong><small>Normalized Action</small></div>
+          <div class="debug-step" id="debugStepDenormalize"><span>5</span><strong>反归一化</strong><small>Action Statistics</small></div>
+          <div class="debug-step" id="debugStepAdapter"><span>6</span><strong>动作解释</strong><small>Ackermann / Twist</small></div>
+          <div class="debug-step" id="debugStepSafety"><span>7</span><strong>安全边界</strong><small>Shadow / No Publish</small></div>
+        </div>
+        <div class="debug-buttons"><button class="button primary" id="captureDebug">采集当前帧</button><button class="button secondary" id="preprocessDebug" disabled>只执行预处理</button><button class="button secondary" id="inferenceDebug" disabled>执行单次推理</button></div>
+        <div class="debug-error" id="debugError" hidden><strong>执行失败</strong><span id="debugErrorMessage">--</span></div>
+        <div class="debug-run-meta"><div><small>Debug Run</small><strong id="debugRunId">尚未创建</strong></div><div><small>Provider / Model</small><strong id="debugProvider">等待推理</strong></div><div><small>总耗时</small><strong id="debugLatency">-- ms</strong></div></div>
+      </article>
+      <article class="panel debug-images">
+        <div class="section-heading"><div><p class="eyebrow">VISUAL INPUT</p><h2>图像对照</h2></div><span class="job-state neutral" id="debugStageState">未开始</span></div>
+        <div class="debug-image-grid"><figure><figcaption>冻结的原始相机帧</figcaption><div class="debug-image-frame"><img id="debugOriginalImage" alt="调试原始相机帧"><span id="debugOriginalEmpty">等待冻结 Observation</span></div></figure><figure><figcaption>Provider 处理后图像</figcaption><div class="debug-image-frame"><img id="debugProcessedImage" alt="模型处理后图像"><span id="debugProcessedEmpty">执行预处理后显示</span></div></figure></div>
+      </article>
+      <article class="panel debug-actions">
+        <div class="section-heading"><div><p class="eyebrow">RAW ACTION OUTPUT</p><h2>动作原始值</h2></div><span id="debugActionShape" class="job-state neutral">Shape --</span></div>
+        <div class="debug-table-wrap"><table class="debug-action-table"><thead><tr><th>Step</th><th>Normalized / Denormalized</th><th>Linear X</th><th>Angular Z</th></tr></thead><tbody id="debugActionRows"><tr><td colspan="4">执行单次推理后显示完整 Action Chunk</td></tr></tbody></table></div>
+      </article>
+      <article class="panel debug-json-panel">
+        <div class="section-heading"><div><p class="eyebrow">DEBUG ENVELOPE</p><h2>完整调试结果</h2></div><button class="button ghost compact-button" id="copyDebugJson" disabled>复制 JSON</button></div>
+        <pre id="debugJson">等待采集当前 Observation。</pre>
+      </article>
+    </div>
+  </div>
+
+  <div class="inspector-panel" data-inspector-panel="history">
+    <div class="pipeline-history-grid">
+      <aside class="panel pipeline-history-list-panel"><div class="section-heading"><div><p class="eyebrow">RECENT OBSERVATIONS</p><h2>最近 Trace</h2></div><button class="icon-button compact" id="refreshPipelineHistory" title="刷新 Trace">↻</button></div><div id="pipelineHistoryList" class="pipeline-history-list"><div class="job-empty"><strong>等待 Trace</strong><span>实时链路运行后自动记录最近 30 条 Observation</span></div></div></aside>
+      <article class="panel pipeline-history-detail"><div class="section-heading"><div><p class="eyebrow">TRACE SNAPSHOT</p><h2 id="pipelineHistoryTitle">选择一条 Trace</h2></div><span id="pipelineHistoryStatus" class="job-state neutral">--</span></div><pre id="pipelineHistoryJson">从左侧选择一条 Trace 查看完整阶段状态。</pre></article>
+    </div>
   </div>
 </section><section class="view-panel" id="view-tools">
   <div class="job-center-grid">

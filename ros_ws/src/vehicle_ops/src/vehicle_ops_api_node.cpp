@@ -7,6 +7,7 @@
 #include <std_msgs/msg/string.hpp>
 #include <vehicle_interfaces/msg/episode_state.hpp>
 #include <vehicle_interfaces/msg/observation_status.hpp>
+#include <vehicle_interfaces/msg/pipeline_trace.hpp>
 #include <vehicle_interfaces/msg/policy_status.hpp>
 #include <vehicle_interfaces/msg/safety_event.hpp>
 #include <vehicle_interfaces/msg/shadow_metrics.hpp>
@@ -24,6 +25,7 @@
 #include <cctype>
 #include <cerrno>
 #include <cstring>
+#include <deque>
 #include <filesystem>
 #include <fstream>
 #include <future>
@@ -137,7 +139,40 @@ std::string mode_name(uint8_t mode)
     default: return "OTHER";
   }
 }
-std::string episode_name(uint8_t state)
+std::string pipeline_stage_status_name(uint8_t status)
+{
+  using Stage = vehicle_interfaces::msg::PipelineStage;
+  switch (status) {
+    case Stage::STATUS_LIVE: return "LIVE";
+    case Stage::STATUS_READY: return "READY";
+    case Stage::STATUS_RUNNING: return "RUNNING";
+    case Stage::STATUS_STALE: return "STALE";
+    case Stage::STATUS_SKIPPED: return "SKIPPED";
+    case Stage::STATUS_REJECTED: return "REJECTED";
+    case Stage::STATUS_FAILED: return "FAILED";
+    default: return "WAITING";
+  }
+}
+nlohmann::json pipeline_trace_json(const vehicle_interfaces::msg::PipelineTrace & trace)
+{
+  nlohmann::json stages = nlohmann::json::array();
+  for (const auto & stage : trace.stages) {
+    nlohmann::json detail = nlohmann::json::object();
+    try {detail = nlohmann::json::parse(stage.detail_json);}
+    catch (const nlohmann::json::exception &) {detail = {{"raw", stage.detail_json}};}
+    stages.push_back({
+      {"stage_id", stage.stage_id}, {"label", stage.label}, {"component", stage.component},
+      {"status", pipeline_stage_status_name(stage.status)}, {"status_code", stage.status},
+      {"age_seconds", stage.age_seconds}, {"latency_ms", stage.latency_ms},
+      {"input_summary", stage.input_summary}, {"output_summary", stage.output_summary},
+      {"message", stage.message}, {"detail", detail},
+      {"control_boundary", stage.control_boundary}, {"publishes_control", stage.publishes_control}});
+  }
+  return {{"trace_id", trace.trace_id}, {"observation_id", trace.observation_id},
+    {"mode", trace.mode}, {"provider_id", trace.provider_id}, {"model_id", trace.model_id},
+    {"shadow_only", trace.shadow_only}, {"publishes_control", trace.publishes_control},
+    {"stages", stages}};
+}std::string episode_name(uint8_t state)
 {
   using M = vehicle_interfaces::msg::EpisodeState;
   switch (state) {
@@ -205,6 +240,8 @@ private:
   std::optional<HttpResponse> authorize(const HttpRequest & request) const;
   HttpResponse static_file(const std::string & path) const;
   HttpResponse camera();
+  HttpResponse pipeline_live();
+  HttpResponse pipeline_history();
   HttpResponse task(const std::string & body);
   HttpResponse start_episode(const std::string & body);
   HttpResponse stop_episode();
@@ -234,6 +271,9 @@ private:
   Timed<vehicle_interfaces::msg::PolicyStatus> policy_;
   Timed<vehicle_interfaces::msg::ShadowMetrics> shadow_;
   Timed<vehicle_interfaces::msg::SafetyEvent> safety_;
+  std::optional<vehicle_interfaces::msg::PipelineTrace> pipeline_trace_;
+  std::deque<vehicle_interfaces::msg::PipelineTrace> pipeline_history_;
+  std::chrono::steady_clock::time_point pipeline_received_{};
   std::vector<uint8_t> camera_data_;
   std::chrono::steady_clock::time_point camera_time_{};
   rclcpp::Subscription<vehicle_interfaces::msg::SystemState>::SharedPtr system_sub_;
@@ -242,6 +282,7 @@ private:
   rclcpp::Subscription<vehicle_interfaces::msg::PolicyStatus>::SharedPtr policy_sub_;
   rclcpp::Subscription<vehicle_interfaces::msg::ShadowMetrics>::SharedPtr shadow_sub_;
   rclcpp::Subscription<vehicle_interfaces::msg::SafetyEvent>::SharedPtr safety_sub_;
+  rclcpp::Subscription<vehicle_interfaces::msg::PipelineTrace>::SharedPtr pipeline_sub_;
   rclcpp::Subscription<sensor_msgs::msg::CompressedImage>::SharedPtr camera_sub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr task_pub_;
   rclcpp::Client<vehicle_interfaces::srv::StartEpisode>::SharedPtr start_client_;
@@ -278,7 +319,19 @@ VehicleOpsApi::VehicleOpsApi() : Node("vehicle_ops_api")
     "/vla/shadow_metrics", state_qos, [this](vehicle_interfaces::msg::ShadowMetrics::SharedPtr message) {update(shadow_, *message);});
   safety_sub_ = create_subscription<vehicle_interfaces::msg::SafetyEvent>(
     "/vla/safety_event", 10, [this](vehicle_interfaces::msg::SafetyEvent::SharedPtr message) {update(safety_, *message);});
-  camera_sub_ = create_subscription<sensor_msgs::msg::CompressedImage>(
+  pipeline_sub_ = create_subscription<vehicle_interfaces::msg::PipelineTrace>(
+    "/vla/pipeline_trace", state_qos,
+    [this](vehicle_interfaces::msg::PipelineTrace::SharedPtr message) {
+      std::lock_guard<std::mutex> lock(mutex_);
+      pipeline_trace_ = *message;
+      pipeline_received_ = std::chrono::steady_clock::now();
+      if (pipeline_history_.empty() || pipeline_history_.front().trace_id != message->trace_id) {
+        pipeline_history_.push_front(*message);
+        while (pipeline_history_.size() > 30) {pipeline_history_.pop_back();}
+      } else {
+        pipeline_history_.front() = *message;
+      }
+    });  camera_sub_ = create_subscription<sensor_msgs::msg::CompressedImage>(
     "/camera/image_compressed", rclcpp::SensorDataQoS(), [this](sensor_msgs::msg::CompressedImage::SharedPtr message) {
       std::lock_guard<std::mutex> lock(mutex_);
       camera_data_ = message->data;
@@ -404,6 +457,8 @@ HttpResponse VehicleOpsApi::route(const HttpRequest & request)
     return {200, "application/json; charset=utf-8", status_json(), {{"Cache-Control", "no-store"}}};
   }
   if (request.method == "GET" && path == "/api/camera/front.jpg") {return camera();}
+  if (request.method == "GET" && path == "/api/pipeline/live") {return pipeline_live();}
+  if (request.method == "GET" && path == "/api/pipeline/history") {return pipeline_history();}
   if (path.rfind("/api/vla-debug/", 0) == 0) {
     const auto denied = authorize(request);
     if (denied) {return *denied;}
@@ -478,7 +533,23 @@ HttpResponse VehicleOpsApi::camera()
   return {200, "image/jpeg", std::string(camera_data_.begin(), camera_data_.end()), {{"Cache-Control", "no-store"}}};
 }
 
-HttpResponse VehicleOpsApi::task(const std::string & body)
+HttpResponse VehicleOpsApi::pipeline_live()
+{
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!pipeline_trace_) {return error(404, "No pipeline trace received");}
+  auto value = pipeline_trace_json(*pipeline_trace_);
+  value["received_age_ms"] = std::chrono::duration<double, std::milli>(
+    std::chrono::steady_clock::now() - pipeline_received_).count();
+  return {200, "application/json; charset=utf-8", value.dump() + "\n", {{"Cache-Control", "no-store"}}};
+}
+HttpResponse VehicleOpsApi::pipeline_history()
+{
+  std::lock_guard<std::mutex> lock(mutex_);
+  nlohmann::json values = nlohmann::json::array();
+  for (const auto & trace : pipeline_history_) {values.push_back(pipeline_trace_json(trace));}
+  return {200, "application/json; charset=utf-8", nlohmann::json({{"traces", values}}).dump() + "\n",
+    {{"Cache-Control", "no-store"}}};
+}HttpResponse VehicleOpsApi::task(const std::string & body)
 {
   const auto value = trim(body);
   if (value.empty()) {return error(400, "Task text is required");}

@@ -16,6 +16,8 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   msg/PolicyAction.msg
   msg/PolicyObservation.msg
   msg/PolicyStatus.msg
+  msg/PipelineStage.msg
+  msg/PipelineTrace.msg
   msg/SafetyEvent.msg
   msg/ShadowComparison.msg
   msg/ShadowMetrics.msg

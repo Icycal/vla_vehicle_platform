@@ -29,6 +29,14 @@ episode_recorder:
     max_episode_duration: 900.0
     image_record_frequency: 5.0
     require_observation_ready: true
+pipeline_trace_aggregator:
+  ros__parameters:
+    publish_frequency: 2.0
+    stale_seconds: 3.0
+    camera_stale_seconds: 1.0
+    command_stale_seconds: 0.75
+    policy_action_stale_seconds: 5.0
+    shadow_stale_seconds: 5.0
 vla_debug_orchestrator:
   ros__parameters:
     artifact_root: "/home/wheeltec/vla_vehicle_platform/run/ops/debug"

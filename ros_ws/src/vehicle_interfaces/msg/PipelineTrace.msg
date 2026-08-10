@@ -1,0 +1,9 @@
+std_msgs/Header header
+string trace_id
+string observation_id
+string mode
+string provider_id
+string model_id
+vehicle_interfaces/PipelineStage[] stages
+bool shadow_only
+bool publishes_control

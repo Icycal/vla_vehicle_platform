@@ -64,7 +64,7 @@ http://10.101.70.232:8088
 
 - **实时监控**：控制模式、四项核心状态、前视相机、链路健康和 Shadow 指标；
 - **数据采集**：Episode Start/Stop、任务文本和 Safe Stop；
-- **VLA 调试**：冻结当前 Observation、仅预处理、单次推理、原始 Action Tensor 和 Twist 解释；
+- **VLA 调试**：被动实时 11 阶段链路、快照单步、原始 Action Tensor、Twist 解释和最近 Trace；
 - **工程工具**：受控任务中心、最近任务历史、日志查看、任务取消和调试命令预览。
 
 切换视图不会启动或停止任何 ROS 节点，也不会丢失当前浏览器会话中的 Operator Token。
@@ -163,6 +163,8 @@ ssh -L 8088:127.0.0.1:8088 wheeltec@10.101.70.232
 |---|---|---:|---|
 | GET | `/api/status` | 否 | 聚合车辆、Policy、Episode、Shadow 和主机状态 |
 | GET | `/api/camera/front.jpg` | 否 | 返回最近一帧压缩图像 |
+| GET | `/api/pipeline/live` | 否 | 返回最新被动 Pipeline Trace |
+| GET | `/api/pipeline/history` | 否 | 返回最近 30 个 Observation Trace |
 | POST | `/api/task` | 是 | 发布 `/vla/task` |
 | POST | `/api/episode/start` | 是 | 调用 Episode Start Service |
 | POST | `/api/episode/stop` | 是 | 调用 Episode Stop Service |

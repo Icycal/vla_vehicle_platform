@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>vehicle_pipeline_trace</name>
+  <version>0.1.0</version>
+  <description>Passive C++ trace aggregation for the vehicle VLA pipeline.</description>
+  <maintainer email="guyahui@cpirhzl.com">guyahui</maintainer>
+  <license>Proprietary</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>geometry_msgs</depend>
+  <depend>rclcpp</depend>
+  <depend>sensor_msgs</depend>
+  <depend>vehicle_interfaces</depend>
+  <depend>nlohmann_json</depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

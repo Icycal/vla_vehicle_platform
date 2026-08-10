@@ -1,5 +1,5 @@
 const $ = (id) => document.getElementById(id);
-const state = { token: sessionStorage.getItem("vehicleOpsToken") || "", cameraTick: 0, selectedJobId: "", jobs: [], debugRunId: "", debugResult: null, debugImageUrls: {} };
+const state = { token: sessionStorage.getItem("vehicleOpsToken") || "", cameraTick: 0, selectedJobId: "", jobs: [], debugRunId: "", debugResult: null, debugImageUrls: {}, pipelineTrace: null, pipelineHistory: [], selectedPipelineStageId: "", selectedPipelineHistoryId: "", inspectorMode: "live" };
 const text = (id, value) => { $(id).textContent = value ?? "—"; };
 const number = (value, digits = 1) => Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : "--";
 function toast(message, error = false) {
@@ -255,14 +255,141 @@ $("cancelJob").addEventListener("click", async () => {
     await refreshJobs(true);
   } catch (error) { toast(error.message, true); }
 });
-function setDebugBusy(busy) {
+function pipelineStatusClass(status) {
+  return ({ LIVE: "live", READY: "ready", RUNNING: "running", STALE: "stale", SKIPPED: "skipped", REJECTED: "rejected", FAILED: "failed" })[status] || "waiting";
+}
+function setInspectorMode(mode) {
+  state.inspectorMode = mode;
+  document.querySelectorAll("[data-inspector-mode]").forEach((button) => {
+    const active = button.dataset.inspectorMode === mode;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", active ? "true" : "false");
+  });
+  document.querySelectorAll("[data-inspector-panel]").forEach((panel) => panel.classList.toggle("active", panel.dataset.inspectorPanel === mode));
+  if (mode === "history") refreshPipelineHistory(true);
+}
+function stageById(trace, stageId) {
+  return trace?.stages?.find((stage) => stage.stage_id === stageId);
+}
+function renderPipelineStageDetail(stage) {
+  if (!stage) return;
+  state.selectedPipelineStageId = stage.stage_id;
+  document.querySelectorAll(".pipeline-stage-node").forEach((node) => node.classList.toggle("selected", node.dataset.stageId === stage.stage_id));
+  text("pipelineStageLabel", stage.label);
+  text("pipelineStageComponent", stage.component);
+  text("pipelineStageInput", stage.input_summary || "--");
+  text("pipelineStageOutput", stage.output_summary || "--");
+  text("pipelineStageLatency", Number(stage.latency_ms) >= 0 ? `${number(stage.latency_ms, 1)} ms` : "--");
+  text("pipelineStageAge", Number(stage.age_seconds) >= 0 ? `${number(stage.age_seconds, 2)} s` : "--");
+  text("pipelineStageMessage", stage.message || "无阶段说明");
+  $("pipelineStageStatus").className = `job-state pipeline-${pipelineStatusClass(stage.status)}`;
+  $("pipelineStageStatus").textContent = stage.status || "WAITING";
+  $("pipelineStageDetail").textContent = JSON.stringify(stage.detail || {}, null, 2);
+}
+function renderPipelineTrace(trace) {
+  state.pipelineTrace = trace;
+  const stages = trace.stages || [];
+  const hasFailure = stages.some((stage) => ["FAILED", "REJECTED"].includes(stage.status));
+  const stale = Number(trace.received_age_ms) > 3000;
+  $("pipelineLiveState").className = `pill ${hasFailure ? "warning" : stale ? "neutral" : "success"}`;
+  $("pipelineLiveState").innerHTML = `<i></i>${hasFailure ? "需要检查" : stale ? "TRACE STALE" : "LIVE TRACE"}`;
+  text("pipelineTraceId", trace.trace_id || "--");
+  text("pipelineObservationId", trace.observation_id || "--");
+  text("pipelineProvider", [trace.provider_id, trace.model_id].filter(Boolean).join(" / ") || "--");
+  text("pipelineReceivedAge", `${number((trace.received_age_ms || 0) / 1000, 1)} s 前`);
+  const rail = $("pipelineStageRail");
+  rail.replaceChildren();
+  stages.forEach((stage, index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `pipeline-stage-node ${pipelineStatusClass(stage.status)}`;
+    button.dataset.stageId = stage.stage_id;
+    button.innerHTML = `<span>${index + 1}</span><strong>${stage.label}</strong><small>${stage.status}</small>`;
+    button.addEventListener("click", () => renderPipelineStageDetail(stage));
+    rail.appendChild(button);
+  });
+  const selected = stageById(trace, state.selectedPipelineStageId) || stages.find((stage) => ["FAILED", "REJECTED", "STALE"].includes(stage.status)) || stages[0];
+  renderPipelineStageDetail(selected);
+  const action = stageById(trace, "policy_output");
+  const safety = stageById(trace, "safety_guard");
+  const shadow = stageById(trace, "shadow_evaluation");
+  text("pipelineActionSummary", action ? `${action.status} · ${action.output_summary}` : "等待 PolicyAction");
+  text("pipelineSafetySummary", safety ? `${safety.status} · ${safety.message}` : "等待 Safety Guard");
+  text("pipelineShadowSummary", shadow ? `${shadow.status} · ${shadow.output_summary}` : "等待对比结果");
+  const camera = stageById(trace, "sensor_capture");
+  if (camera && ["LIVE", "READY"].includes(camera.status)) {
+    $("pipelineLiveImage").style.display = "block";
+    $("pipelineLiveEmpty").style.display = "none";
+    $("pipelineLiveImage").src = `/api/camera/front.jpg?t=${Date.now()}`;
+  } else {
+    $("pipelineLiveImage").style.display = "none";
+    $("pipelineLiveEmpty").style.display = "grid";
+  }
+}
+async function refreshPipeline(showError = false) {
+  try {
+    const response = await fetch("/api/pipeline/live", { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    renderPipelineTrace(await response.json());
+  } catch (error) {
+    $("pipelineLiveState").className = "pill warning";
+    $("pipelineLiveState").innerHTML = "<i></i>TRACE OFFLINE";
+    if (showError) toast(error.message, true);
+  }
+}
+function renderPipelineHistory() {
+  const list = $("pipelineHistoryList");
+  list.replaceChildren();
+  if (!state.pipelineHistory.length) {
+    list.innerHTML = '<div class="job-empty"><strong>暂无 Trace</strong><span>等待新的 Observation</span></div>';
+    return;
+  }
+  state.pipelineHistory.forEach((trace) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    const failed = (trace.stages || []).some((stage) => ["FAILED", "REJECTED"].includes(stage.status));
+    button.className = `pipeline-history-row${state.selectedPipelineHistoryId === trace.trace_id ? " active" : ""}`;
+    button.innerHTML = `<span><strong>${trace.observation_id || trace.trace_id}</strong><small>${trace.provider_id || "--"} · ${(trace.stages || []).length} stages</small></span><b class="job-state pipeline-${failed ? "rejected" : "ready"}">${failed ? "CHECK" : "READY"}</b>`;
+    button.addEventListener("click", () => {
+      state.selectedPipelineHistoryId = trace.trace_id;
+      renderPipelineHistory();
+      text("pipelineHistoryTitle", trace.observation_id || trace.trace_id);
+      $("pipelineHistoryStatus").className = `job-state pipeline-${failed ? "rejected" : "ready"}`;
+      $("pipelineHistoryStatus").textContent = failed ? "CHECK" : "READY";
+      $("pipelineHistoryJson").textContent = JSON.stringify(trace, null, 2);
+    });
+    list.appendChild(button);
+  });
+}
+async function refreshPipelineHistory(showError = false) {
+  try {
+    const response = await fetch("/api/pipeline/history", { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    state.pipelineHistory = (await response.json()).traces || [];
+    renderPipelineHistory();
+  } catch (error) { if (showError) toast(error.message, true); }
+}
+function clearDebugError() {
+  $("debugError").hidden = true;
+  text("debugErrorMessage", "--");
+}
+function showDebugError(error) {
+  $("debugError").hidden = false;
+  text("debugErrorMessage", error.message || String(error));
+}function setDebugBusy(busy) {
   $("captureDebug").disabled = busy;
   $("preprocessDebug").disabled = busy || !state.debugRunId;
   $("inferenceDebug").disabled = busy || !state.debugRunId;
 }
 function setDebugStage(stage, label, stateClass = "running") {
-  ["Capture", "Preprocess", "Inference"].forEach((name) => {
-    $("debugStep" + name).classList.toggle("active", name.toLowerCase() === stage);
+  const stages = ["Capture", "Contract", "Preprocess", "Inference", "Denormalize", "Adapter", "Safety"];
+  const activeIndex = ({ capture: 0, preprocess: 2, inference: 3 })[stage] ?? 0;
+  const completedIndex = stateClass === "succeeded" ? ({ capture: 1, preprocess: 2, inference: 6 })[stage] : activeIndex - 1;
+  stages.forEach((name, index) => {
+    const node = $("debugStep" + name);
+    node.classList.toggle("active", stateClass === "running" && index === activeIndex);
+    node.classList.toggle("completed", index <= completedIndex);
+    node.classList.toggle("failed", stateClass === "failed" && index === activeIndex);
   });
   $("debugStageState").className = `job-state ${stateClass}`;
   $("debugStageState").textContent = label;
@@ -277,6 +404,11 @@ async function loadDebugImage(kind, imageId, emptyId) {
   state.debugImageUrls[kind] = URL.createObjectURL(await response.blob());
   $(imageId).src = state.debugImageUrls[kind];
   $(imageId).style.display = "block";
+  if (kind === "processed") {
+    $("pipelineProcessedImage").src = state.debugImageUrls[kind];
+    $("pipelineProcessedImage").style.display = "block";
+    $("pipelineProcessedEmpty").style.display = "none";
+  }
   $(emptyId).style.display = "none";
 }
 function renderDebugResult(result) {
@@ -315,6 +447,7 @@ function renderDebugResult(result) {
   }
 }
 async function captureDebugObservation() {
+  clearDebugError();
   if (!state.token) { openToken(); throw new Error("请先填写操作令牌"); }
   setDebugBusy(true); setDebugStage("capture", "采集中");
   try {
@@ -333,6 +466,7 @@ async function captureDebugObservation() {
   } finally { setDebugBusy(false); }
 }
 async function runDebugStage(stage) {
+  clearDebugError();
   if (!state.debugRunId) throw new Error("请先采集当前帧");
   setDebugBusy(true);
   setDebugStage(stage, stage === "preprocess" ? "预处理中" : "推理中");
@@ -348,22 +482,28 @@ async function runDebugStage(stage) {
   } finally { setDebugBusy(false); }
 }
 $("captureDebug").addEventListener("click", async () => {
-  try { await captureDebugObservation(); } catch (error) { setDebugStage("capture", "执行失败", "failed"); toast(error.message, true); setDebugBusy(false); }
+  try { await captureDebugObservation(); } catch (error) { setDebugStage("capture", "执行失败", "failed"); showDebugError(error); toast(error.message, true); setDebugBusy(false); }
 });
 $("preprocessDebug").addEventListener("click", async () => {
-  try { await runDebugStage("preprocess"); } catch (error) { setDebugStage("preprocess", "执行失败", "failed"); toast(error.message, true); setDebugBusy(false); }
+  try { await runDebugStage("preprocess"); } catch (error) { setDebugStage("preprocess", "执行失败", "failed"); showDebugError(error); toast(error.message, true); setDebugBusy(false); }
 });
 $("inferenceDebug").addEventListener("click", async () => {
   if (!confirm("确认执行一次 VLA 推理？结果只用于 Shadow 调试，不会发布控制命令。")) return;
-  try { await runDebugStage("inference"); } catch (error) { setDebugStage("inference", "执行失败", "failed"); toast(error.message, true); setDebugBusy(false); }
+  try { await runDebugStage("inference"); } catch (error) { setDebugStage("inference", "执行失败", "failed"); showDebugError(error); toast(error.message, true); setDebugBusy(false); }
 });
 $("copyDebugJson").addEventListener("click", async () => {
   try { await navigator.clipboard.writeText($("debugJson").textContent); toast("调试 JSON 已复制"); }
   catch { toast("浏览器禁止剪贴板访问，请手动复制", true); }
 });
-updateCommand();
+document.querySelectorAll("[data-inspector-mode]").forEach((button) => button.addEventListener("click", () => setInspectorMode(button.dataset.inspectorMode)));
+$("refreshPipelineHistory").addEventListener("click", () => refreshPipelineHistory(true));
+setInspectorMode("live");updateCommand();
 setView(["monitor", "capture", "debug", "tools"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "monitor");
 refresh();
+refreshPipeline();
+refreshPipelineHistory();
 refreshJobs();
 setInterval(refresh, 1000);
+setInterval(refreshPipeline, 1000);
+setInterval(refreshPipelineHistory, 5000);
 setInterval(() => refreshJobs(), 2000);

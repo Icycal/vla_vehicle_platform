@@ -1,0 +1,22 @@
+uint8 STATUS_WAITING=0
+uint8 STATUS_LIVE=1
+uint8 STATUS_READY=2
+uint8 STATUS_RUNNING=3
+uint8 STATUS_STALE=4
+uint8 STATUS_SKIPPED=5
+uint8 STATUS_REJECTED=6
+uint8 STATUS_FAILED=7
+
+string stage_id
+string label
+string component
+uint8 status
+builtin_interfaces/Time updated_at
+float32 age_seconds
+float32 latency_ms
+string input_summary
+string output_summary
+string message
+string detail_json
+bool control_boundary
+bool publishes_control

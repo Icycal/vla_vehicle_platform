@@ -210,7 +210,7 @@ The first run creates a random operator token under `run/config/vehicle_ops.env`
 URL. The offline responsive UI aggregates Supervisor, Observation, camera, Policy, Episode, Shadow,
 Safety, and Orin host status. Token-protected write operations are restricted to task publication,
 Episode Start/Stop, and Supervisor Safe Stop. It never publishes `/cmd_vel`, accesses the chassis
-serial port, or executes arbitrary shell commands. The VLA Pipeline Inspector can freeze one Observation, run preprocessing, and execute exactly one Shadow-only inference while displaying the complete raw Action Chunk. See `docs/VEHICLE_OPS_CONSOLE.md` and `docs/VLA_PIPELINE_INSPECTOR.md`.
+serial port, or executes arbitrary shell commands. The VLA Pipeline Inspector can freeze one Observation, run preprocessing, and execute exactly one Shadow-only inference while displaying the complete raw Action Chunk. See `docs/VEHICLE_OPS_CONSOLE.md`, `docs/VLA_PIPELINE_INSPECTOR.md`, and `docs/VLA_PIPELINE_TRACE.md`.
 
 ## Dataset export and replay
 
