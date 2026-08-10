@@ -20,17 +20,17 @@ button,input,textarea,select{font:inherit}
 .pill.neutral{color:var(--muted)}
 .icon-button{width:36px;height:36px;border:1px solid var(--line);border-radius:10px;background:#0d1c2b;color:var(--text);cursor:pointer;font-size:19px}
 .icon-button:hover{border-color:#2d6478;color:var(--cyan)}
-main{width:min(1340px,93vw);margin:auto;padding:30px 0 24px}
-.overview{min-height:142px;display:grid;grid-template-columns:1fr 430px;align-items:center;gap:30px;padding:26px 30px;margin-bottom:14px;border:1px solid var(--line);border-radius:22px;background:linear-gradient(110deg,#0e2234,#0a1927 58%,#0c1d2c)}
+main{width:min(1340px,93vw);margin:auto;padding:20px 0 24px}
+.overview{min-height:82px;display:grid;grid-template-columns:minmax(0,1fr) minmax(320px,420px);align-items:center;gap:18px;padding:13px 18px;margin-bottom:12px;border:1px solid var(--line);border-radius:15px;background:linear-gradient(110deg,#0d2030,#091724 64%,#0b1b29)}
 .eyebrow{color:var(--cyan);font-size:9px;letter-spacing:.22em;font-weight:750;margin:0 0 9px}
-.overview h1{font-size:clamp(32px,4vw,48px);letter-spacing:-.035em;margin:0}
-.overview-copy>p:last-child{color:var(--muted);font-size:13px;margin:10px 0 0}
-.mode-card{display:flex;align-items:center;gap:17px;padding:19px 22px;border:1px solid #20384d;border-radius:17px;background:#0a1927}
-.mode-card small,.metric small{color:var(--muted);font-size:9px;letter-spacing:.12em;text-transform:uppercase}
-.mode-card strong{display:block;font-size:22px;margin:5px 0}
-.mode-card p{color:var(--muted);font-size:11px;margin:0}
-.orb{width:58px;height:58px;border-radius:50%;display:grid;place-items:center;border:1px solid #38562b;background:#13251d}
-.orb span{width:16px;height:16px;border-radius:50%;background:var(--lime);box-shadow:0 0 18px rgba(169,236,69,.7)}
+.overview h1{font-size:24px;letter-spacing:-.025em;margin:0}
+.overview-copy>p:last-child{color:var(--muted);font-size:10px;margin:4px 0 0}
+.mode-card{display:flex;align-items:center;gap:11px;min-width:0;padding:10px 13px;border:1px solid #20384d;border-radius:11px;background:#091824}
+.mode-card small,.metric small{color:var(--muted);font-size:9px;letter-spacing:.1em}.mode-card small>span{margin-left:6px;font-size:7px;text-transform:uppercase;opacity:.68}
+.mode-card strong{display:block;font-size:16px;margin:3px 0}
+.mode-card p{max-width:300px;overflow:hidden;color:var(--muted);font-size:9px;margin:0;text-overflow:ellipsis;white-space:nowrap}
+.orb{flex:0 0 18px;width:18px;height:18px;border-radius:50%;display:grid;place-items:center;border:1px solid #38562b;background:#13251d}
+.orb span{width:7px;height:7px;border-radius:50%;background:var(--lime);box-shadow:0 0 9px rgba(169,236,69,.75)}
 .orb.danger{border-color:#6b2d39;background:#2a151b}
 .orb.danger span{background:var(--danger);box-shadow:0 0 18px rgba(243,91,112,.65)}
 .metrics-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:14px}
@@ -123,7 +123,7 @@ footer{width:min(1340px,93vw);margin:auto;padding:8px 0 25px;display:flex;justif
 .main-nav{grid-row:2;grid-column:1/-1;order:3;padding-bottom:9px}
 .topbar{height:auto;min-height:68px;padding-top:10px}
 .top-actions{justify-self:end}
-.overview{grid-template-columns:1fr}
+.overview{grid-template-columns:minmax(0,1fr) minmax(280px,360px)}
 .metrics-grid{grid-template-columns:1fr 1fr}
 .monitor-grid,.capture-grid,.tools-grid{grid-template-columns:1fr}
 .live-summary{min-height:390px}
@@ -135,9 +135,9 @@ footer{width:min(1340px,93vw);margin:auto;padding:8px 0 25px;display:flex;justif
 .top-actions .pill{display:none}
 .main-nav{justify-content:stretch}
 .nav-item{flex:1;padding:8px 6px}
-.overview{padding:20px;min-height:auto}
-.overview h1{font-size:32px}
-.mode-card{padding:15px}
+.overview{grid-template-columns:1fr;padding:12px 14px;min-height:auto}
+.overview h1{font-size:21px}
+.mode-card{padding:9px 11px}
 .metrics-grid{grid-template-columns:1fr 1fr;gap:8px}
 .metric{padding:13px}
 .metric-icon{display:none}
@@ -153,7 +153,7 @@ footer{flex-direction:column;gap:6px}
 }
 @media(max-width:430px){.metrics-grid{grid-template-columns:1fr}
 .mode-card{align-items:flex-start}
-.orb{width:46px;height:46px}
+.orb{width:18px;height:18px}
 .overview-copy>p:last-child{line-height:1.5}
 }
 
