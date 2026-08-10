@@ -258,7 +258,53 @@ $("cancelJob").addEventListener("click", async () => {
 function pipelineStatusClass(status) {
   return ({ LIVE: "live", READY: "ready", RUNNING: "running", STALE: "stale", SKIPPED: "skipped", REJECTED: "rejected", FAILED: "failed" })[status] || "waiting";
 }
-function setInspectorMode(mode) {
+const pipelineStageNames = {
+  sensor_capture: { zh: "传感器采集", en: "Sensor Capture" },
+  observation_health: { zh: "输入健康检查", en: "Observation Health" },
+  observation_assembly: { zh: "观测数据组装", en: "Observation Assembly" },
+  contract_validation: { zh: "数据契约校验", en: "Contract Validation" },
+  model_runtime: { zh: "模型运行时", en: "Model Runtime" },
+  policy_output: { zh: "策略动作输出", en: "Policy Output" },
+  action_runtime: { zh: "动作运行时", en: "Action Runtime" },
+  control_mux: { zh: "控制指令仲裁", en: "Control Arbitration" },
+  safety_guard: { zh: "安全防护", en: "Safety Guard" },
+  shadow_evaluation: { zh: "影子模式评估", en: "Shadow Evaluation" },
+  trace_recording: { zh: "数据追踪记录", en: "Episode / Trace" }
+};
+const pipelineStatusNames = {
+  WAITING: { zh: "等待数据", en: "WAITING" },
+  LIVE: { zh: "实时", en: "LIVE" },
+  READY: { zh: "就绪", en: "READY" },
+  RUNNING: { zh: "运行中", en: "RUNNING" },
+  STALE: { zh: "数据过期", en: "STALE" },
+  SKIPPED: { zh: "已跳过", en: "SKIPPED" },
+  REJECTED: { zh: "已拒绝", en: "REJECTED" },
+  FAILED: { zh: "失败", en: "FAILED" }
+};
+const pipelineStageDescriptions = {
+  sensor_capture: "正在接收前视相机压缩图像。",
+  observation_health: "正在检查相机、里程计、IMU 和标定状态。",
+  observation_assembly: "正在把图像、车辆状态和任务文本组装为统一观测数据。",
+  contract_validation: "正在校验观测 Schema、图像、任务和状态有效性。",
+  model_runtime: "正在检查模型服务、模型版本和推理运行状态。",
+  policy_output: "正在检查模型生成的动作序列及其数据新鲜度。",
+  action_runtime: "正在把策略动作序列转换为车辆候选速度指令。",
+  control_mux: "正在根据当前控制模式选择候选控制来源。",
+  safety_guard: "正在检查安全规则和最终速度指令。",
+  shadow_evaluation: "正在比较模型预测动作与车辆实际执行动作。",
+  trace_recording: "正在检查 Episode 和链路追踪记录状态。"
+};
+function pipelineStageName(stage) {
+  return pipelineStageNames[stage?.stage_id] || { zh: stage?.label || "未知阶段", en: stage?.label || "Unknown Stage" };
+}
+function pipelineStatusName(status) {
+  return pipelineStatusNames[status] || { zh: "未知状态", en: status || "UNKNOWN" };
+}
+function pipelineStageDescription(stage) {
+  const base = pipelineStageDescriptions[stage?.stage_id] || "正在读取当前阶段状态。";
+  if (["FAILED", "REJECTED", "STALE"].includes(stage?.status) && stage?.message) return `${base} 当前异常：${stage.message}`;
+  return base;
+}function setInspectorMode(mode) {
   state.inspectorMode = mode;
   document.querySelectorAll("[data-inspector-mode]").forEach((button) => {
     const active = button.dataset.inspectorMode === mode;
@@ -275,15 +321,23 @@ function renderPipelineStageDetail(stage) {
   if (!stage) return;
   state.selectedPipelineStageId = stage.stage_id;
   document.querySelectorAll(".pipeline-stage-node").forEach((node) => node.classList.toggle("selected", node.dataset.stageId === stage.stage_id));
-  text("pipelineStageLabel", stage.label);
-  text("pipelineStageComponent", stage.component);
+  const name = pipelineStageName(stage);
+  const statusName = pipelineStatusName(stage.status);
+  text("pipelineStageLabel", name.zh);
+  text("pipelineStageEnglish", name.en);
+  text("pipelineStageComponent", `节点 / 组件：${stage.component}`);
   text("pipelineStageInput", stage.input_summary || "--");
   text("pipelineStageOutput", stage.output_summary || "--");
   text("pipelineStageLatency", Number(stage.latency_ms) >= 0 ? `${number(stage.latency_ms, 1)} ms` : "--");
   text("pipelineStageAge", Number(stage.age_seconds) >= 0 ? `${number(stage.age_seconds, 2)} s` : "--");
-  text("pipelineStageMessage", stage.message || "无阶段说明");
+  const messageBox = $("pipelineStageMessage");
+  const chineseMessage = document.createElement("strong");
+  const originalMessage = document.createElement("span");
+  chineseMessage.textContent = pipelineStageDescription(stage);
+  originalMessage.textContent = stage.message || "No stage message";
+  messageBox.replaceChildren(chineseMessage, originalMessage);
   $("pipelineStageStatus").className = `job-state pipeline-${pipelineStatusClass(stage.status)}`;
-  $("pipelineStageStatus").textContent = stage.status || "WAITING";
+  $("pipelineStageStatus").textContent = `${statusName.zh} · ${statusName.en}`;
   $("pipelineStageDetail").textContent = JSON.stringify(stage.detail || {}, null, 2);
 }
 function renderPipelineTrace(trace) {
@@ -292,7 +346,7 @@ function renderPipelineTrace(trace) {
   const hasFailure = stages.some((stage) => ["FAILED", "REJECTED"].includes(stage.status));
   const stale = Number(trace.received_age_ms) > 3000;
   $("pipelineLiveState").className = `pill ${hasFailure ? "warning" : stale ? "neutral" : "success"}`;
-  $("pipelineLiveState").innerHTML = `<i></i>${hasFailure ? "需要检查" : stale ? "TRACE STALE" : "LIVE TRACE"}`;
+  $("pipelineLiveState").innerHTML = `<i></i>${hasFailure ? "需要检查 · CHECK" : stale ? "追踪过期 · STALE" : "实时追踪 · LIVE"}`;
   text("pipelineTraceId", trace.trace_id || "--");
   text("pipelineObservationId", trace.observation_id || "--");
   text("pipelineProvider", [trace.provider_id, trace.model_id].filter(Boolean).join(" / ") || "--");
@@ -304,7 +358,19 @@ function renderPipelineTrace(trace) {
     button.type = "button";
     button.className = `pipeline-stage-node ${pipelineStatusClass(stage.status)}`;
     button.dataset.stageId = stage.stage_id;
-    button.innerHTML = `<span>${index + 1}</span><strong>${stage.label}</strong><small>${stage.status}</small>`;
+    const name = pipelineStageName(stage);
+    const statusName = pipelineStatusName(stage.status);
+    const sequence = document.createElement("span");
+    const chinese = document.createElement("strong");
+    const english = document.createElement("em");
+    const chineseStatus = document.createElement("small");
+    const englishStatus = document.createElement("i");
+    sequence.textContent = index + 1;
+    chinese.textContent = name.zh;
+    english.textContent = name.en;
+    chineseStatus.textContent = statusName.zh;
+    englishStatus.textContent = statusName.en;
+    button.append(sequence, chinese, english, chineseStatus, englishStatus);
     button.addEventListener("click", () => renderPipelineStageDetail(stage));
     rail.appendChild(button);
   });
@@ -313,9 +379,9 @@ function renderPipelineTrace(trace) {
   const action = stageById(trace, "policy_output");
   const safety = stageById(trace, "safety_guard");
   const shadow = stageById(trace, "shadow_evaluation");
-  text("pipelineActionSummary", action ? `${action.status} · ${action.output_summary}` : "等待 PolicyAction");
-  text("pipelineSafetySummary", safety ? `${safety.status} · ${safety.message}` : "等待 Safety Guard");
-  text("pipelineShadowSummary", shadow ? `${shadow.status} · ${shadow.output_summary}` : "等待对比结果");
+  text("pipelineActionSummary", action ? `${pipelineStatusName(action.status).zh} · ${action.output_summary}` : "等待策略动作输出");
+  text("pipelineSafetySummary", safety ? `${pipelineStatusName(safety.status).zh} · ${pipelineStageDescription(safety)}` : "等待安全防护结果");
+  text("pipelineShadowSummary", shadow ? `${pipelineStatusName(shadow.status).zh} · ${shadow.output_summary}` : "等待影子评估结果");
   const camera = stageById(trace, "sensor_capture");
   if (camera && ["LIVE", "READY"].includes(camera.status)) {
     $("pipelineLiveImage").style.display = "block";
@@ -333,7 +399,7 @@ async function refreshPipeline(showError = false) {
     renderPipelineTrace(await response.json());
   } catch (error) {
     $("pipelineLiveState").className = "pill warning";
-    $("pipelineLiveState").innerHTML = "<i></i>TRACE OFFLINE";
+    $("pipelineLiveState").innerHTML = "<i></i>追踪离线 · OFFLINE";
     if (showError) toast(error.message, true);
   }
 }
@@ -349,13 +415,13 @@ function renderPipelineHistory() {
     button.type = "button";
     const failed = (trace.stages || []).some((stage) => ["FAILED", "REJECTED"].includes(stage.status));
     button.className = `pipeline-history-row${state.selectedPipelineHistoryId === trace.trace_id ? " active" : ""}`;
-    button.innerHTML = `<span><strong>${trace.observation_id || trace.trace_id}</strong><small>${trace.provider_id || "--"} · ${(trace.stages || []).length} stages</small></span><b class="job-state pipeline-${failed ? "rejected" : "ready"}">${failed ? "CHECK" : "READY"}</b>`;
+    button.innerHTML = `<span><strong>${trace.observation_id || trace.trace_id}</strong><small>${trace.provider_id || "--"} · ${(trace.stages || []).length} 个阶段 / stages</small></span><b class="job-state pipeline-${failed ? "rejected" : "ready"}">${failed ? "检查 · CHECK" : "正常 · READY"}</b>`;
     button.addEventListener("click", () => {
       state.selectedPipelineHistoryId = trace.trace_id;
       renderPipelineHistory();
       text("pipelineHistoryTitle", trace.observation_id || trace.trace_id);
       $("pipelineHistoryStatus").className = `job-state pipeline-${failed ? "rejected" : "ready"}`;
-      $("pipelineHistoryStatus").textContent = failed ? "CHECK" : "READY";
+      $("pipelineHistoryStatus").textContent = failed ? "检查 · CHECK" : "正常 · READY";
       $("pipelineHistoryJson").textContent = JSON.stringify(trace, null, 2);
     });
     list.appendChild(button);
