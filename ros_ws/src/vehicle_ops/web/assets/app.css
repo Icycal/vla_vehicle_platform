@@ -35,6 +35,11 @@ main{width:min(1340px,93vw);margin:auto;padding:20px 0 24px}
 .orb.danger span{background:var(--danger);box-shadow:0 0 18px rgba(243,91,112,.65)}
 .metrics-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:14px}
 .metric{min-width:0;display:flex;align-items:center;gap:13px;padding:16px 18px;border:1px solid var(--line);border-radius:15px;background:var(--surface)}
+.metric[data-tooltip]{cursor:help;transition:border-color .18s ease,background .18s ease,transform .18s ease}
+.metric[data-tooltip]:hover,.metric[data-tooltip]:focus-visible{border-color:rgba(41,217,255,.48);background:linear-gradient(145deg,rgba(17,39,56,.98),rgba(10,27,41,.98));transform:translateY(-1px)}
+.metric[data-tooltip]:focus-visible{outline:2px solid rgba(41,217,255,.28);outline-offset:3px}
+.metric-tooltip{position:fixed;z-index:400;width:max-content;max-width:min(360px,calc(100vw - 24px));padding:12px 14px;border:1px solid rgba(41,217,255,.32);border-radius:11px;background:rgba(4,15,24,.97);box-shadow:0 16px 38px rgba(0,0,0,.48),inset 0 1px rgba(255,255,255,.04);color:#bcd4e2;font:10px/1.7 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-line;pointer-events:none;opacity:0;visibility:hidden;transform:translateY(4px);transition:opacity .14s ease,transform .14s ease,visibility .14s ease;backdrop-filter:blur(12px)}
+.metric-tooltip.visible{opacity:1;visibility:visible;transform:translateY(0)}
 .metric-icon{flex:0 0 36px;width:36px;height:36px;border-radius:10px;display:grid;place-items:center;background:#14283b}
 .metric-icon.cyan{color:var(--cyan)}
 .metric-icon.violet{color:var(--violet)}

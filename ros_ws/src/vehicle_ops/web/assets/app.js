@@ -2,6 +2,68 @@ const $ = (id) => document.getElementById(id);
 const state = { token: sessionStorage.getItem("vehicleOpsToken") || "", cameraSequence: 0, pipelineCameraSequence: 0, cameraStatus: null, pipelineCameraActive: false, selectedJobId: "", jobs: [], debugRunId: "", debugResult: null, debugImageUrls: {}, pipelineTrace: null, pipelineHistory: [], selectedPipelineStageId: "", selectedPipelineHistoryId: "", inspectorMode: "live", components: [], componentProfiles: [], selectedComponentId: "", storage: null, storageItems: [], selectedStorageCategory: "" };
 const text = (id, value) => { $(id).textContent = value ?? "—"; };
 const number = (value, digits = 1) => Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : "--";
+function setMetricTooltip(valueId, heading, rows) {
+  const value = $(valueId);
+  const card = value?.closest(".metric");
+  if (!card) return;
+  const details = [heading, ...rows.filter(Boolean)].join("\n");
+  card.dataset.tooltip = details;
+  card.tabIndex = 0;
+  card.setAttribute("aria-label", details.replaceAll("\n", "，"));
+}
+function initMetricTooltip() {
+  const tooltip = document.createElement("div");
+  tooltip.id = "metricTooltip";
+  tooltip.className = "metric-tooltip";
+  tooltip.setAttribute("role", "tooltip");
+  document.body.appendChild(tooltip);
+  let activeCard = null;
+  const hide = () => {
+    activeCard = null;
+    tooltip.classList.remove("visible");
+  };
+  const position = (card) => {
+    if (!card?.dataset.tooltip) return;
+    activeCard = card;
+    tooltip.textContent = card.dataset.tooltip;
+    tooltip.classList.add("visible");
+    const cardRect = card.getBoundingClientRect();
+    const tooltipRect = tooltip.getBoundingClientRect();
+    const margin = 12;
+    const gap = 10;
+    const left = Math.min(
+      Math.max(cardRect.left + cardRect.width / 2 - tooltipRect.width / 2, margin),
+      window.innerWidth - tooltipRect.width - margin
+    );
+    let top = cardRect.bottom + gap;
+    if (top + tooltipRect.height > window.innerHeight - margin) {
+      top = cardRect.top - tooltipRect.height - gap;
+    }
+    tooltip.style.left = `${left}px`;
+    tooltip.style.top = `${Math.max(margin, top)}px`;
+  };
+  document.addEventListener("pointerover", (event) => {
+    const card = event.target.closest?.(".metric[data-tooltip]");
+    if (card) position(card);
+  });
+  document.addEventListener("pointerout", (event) => {
+    const card = event.target.closest?.(".metric[data-tooltip]");
+    if (card && !card.contains(event.relatedTarget)) hide();
+  });
+  document.addEventListener("focusin", (event) => {
+    const card = event.target.closest?.(".metric[data-tooltip]");
+    if (card) position(card);
+  });
+  document.addEventListener("focusout", (event) => {
+    const card = event.target.closest?.(".metric[data-tooltip]");
+    if (card && !card.contains(event.relatedTarget)) hide();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") hide();
+  });
+  window.addEventListener("resize", () => activeCard && position(activeCard));
+  window.addEventListener("scroll", () => activeCard && position(activeCard), true);
+}
 function toast(message, error = false) {
   const node = $("toast");
   node.textContent = message;
@@ -86,6 +148,43 @@ function render(data) {
   text("hostMeta", `${number(usedMemory / 1024, 1)} / ${number(totalMemory / 1024, 1)} GB · Swap ${number(swapUsed / 1024, 1)} GB`);
   text("gpuState", `${number(data.host?.gpu_usage_percent, 0)}%`);
   text("gpuMeta", `${number(data.host?.gpu_frequency_mhz, 0)} MHz · ${number(data.host?.gpu_temperature_c, 1)}°C · 共享内存`);
+  setMetricTooltip("observationState", "Observation / 观测输入", [
+    `状态：${$("observationState").textContent}`,
+    `说明：${$("observationMeta").textContent}`,
+    `图像：${data.observation?.image_width || "--"} × ${data.observation?.image_height || "--"}`
+  ]);
+  setMetricTooltip("policyState", "Policy Runtime / 策略运行时", [
+    `状态：${$("policyState").textContent}`,
+    `Provider：${data.policy?.provider_id || "--"}`,
+    `模型：${data.policy?.model_id || "--"}`,
+    `推理延迟：${number(data.policy?.inference_latency_ms, 1)} ms`,
+    `说明：${data.policy?.message || "--"}`
+  ]);
+  setMetricTooltip("episodeState", "Episode / 数据记录", [
+    `状态：${$("episodeState").textContent}`,
+    `Episode：${data.episode?.episode_id || "未开始"}`,
+    `任务：${data.episode?.task || "--"}`,
+    `消息 / 图像：${data.episode?.message_count || 0} / ${data.episode?.image_count || 0}`,
+    `说明：${data.episode?.message || "--"}`
+  ]);
+  setMetricTooltip("cpuState", "处理器 CPU", [
+    `使用率：${number(data.host?.cpu_usage_percent, 0)}%`,
+    `核心数：${data.host?.cpu_cores || "--"}`,
+    `温度：${number(data.host?.cpu_temperature_c, 1)}°C`,
+    `一分钟负载：${number(data.host?.load_one, 2)}`
+  ]);
+  setMetricTooltip("memoryState", "统一内存 RAM", [
+    `使用率：${Number.isFinite(memoryRatio) ? memoryRatio.toFixed(0) : "--"}%`,
+    `已用 / 总量：${number(usedMemory / 1024, 1)} / ${number(totalMemory / 1024, 1)} GB`,
+    `Swap 已用：${number(swapUsed / 1024, 1)} GB`,
+    "说明：Jetson CPU 与 GPU 共享统一内存"
+  ]);
+  setMetricTooltip("gpuState", "图形处理器 GPU", [
+    `使用率：${number(data.host?.gpu_usage_percent, 0)}%`,
+    `频率：${number(data.host?.gpu_frequency_mhz, 0)} MHz`,
+    `温度：${number(data.host?.gpu_temperature_c, 1)}°C`,
+    "显存模式：与系统共享统一内存"
+  ]);
   text("cameraResolution", `${data.observation?.image_width || "--"} × ${data.observation?.image_height || "--"}`);
   text("cameraAge", data.camera?.age_ms >= 0 ? `更新 ${number(data.camera.age_ms / 1000, 1)}s 前` : "更新时间 --");
   text("calibrationState", data.observation?.camera_calibrated ? "已标定" : "未标定");
@@ -818,6 +917,7 @@ $("selectAllStorage").addEventListener("click", () => {
   updateStorageSelection();
 });
 $("cleanupStorage").addEventListener("click", cleanupSelectedStorage);
+initMetricTooltip();
 refreshStorage();
 setInterval(refreshStorage, 10000);
 setInterval(refresh, 1000);
