@@ -55,6 +55,10 @@
           <div class="debug-step" id="debugStepAdapter"><span>6</span><strong>动作解释</strong><small>Ackermann / Twist</small></div>
           <div class="debug-step" id="debugStepSafety"><span>7</span><strong>安全边界</strong><small>Shadow / No Publish</small></div>
         </div>
+        <div class="debug-mode-guard" id="debugModeGuard" data-state="unknown">
+          <div class="debug-mode-copy"><small>当前控制模式 · CONTROL MODE</small><strong id="debugModeState">正在读取车辆状态</strong><span id="debugModeHint">快照调试要求车辆处于 VLA_SHADOW 模式</span></div>
+          <button class="button shadow-mode-button" id="enterShadowMode" type="button" disabled>进入影子调试模式</button>
+        </div>
         <div class="debug-buttons"><button class="button primary" id="captureDebug">采集当前帧</button><button class="button secondary" id="preprocessDebug" disabled>只执行预处理</button><button class="button secondary" id="inferenceDebug" disabled>执行单次推理</button></div>
         <div class="debug-error" id="debugError" hidden><strong>执行失败</strong><span id="debugErrorMessage">--</span></div>
         <div class="debug-run-meta"><div><small>调试编号<span>Debug Run</span></small><strong id="debugRunId">尚未创建</strong></div><div><small>模型服务<span>Provider / Model</span></small><strong id="debugProvider">等待推理</strong></div><div><small>总耗时<span>Total</span></small><strong id="debugLatency">-- ms</strong></div></div>

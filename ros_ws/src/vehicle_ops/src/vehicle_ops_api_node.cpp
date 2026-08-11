@@ -13,6 +13,7 @@
 #include <vehicle_interfaces/msg/shadow_metrics.hpp>
 #include <vehicle_interfaces/msg/system_state.hpp>
 #include <vehicle_interfaces/srv/request_safe_stop.hpp>
+#include <vehicle_interfaces/srv/request_control_mode.hpp>
 #include <vehicle_interfaces/srv/start_episode.hpp>
 #include <vehicle_interfaces/srv/stop_episode.hpp>
 #include <vehicle_interfaces/srv/capture_vla_debug.hpp>
@@ -343,6 +344,7 @@ private:
   HttpResponse start_episode(const std::string & body);
   HttpResponse stop_episode();
   HttpResponse safe_stop(const std::string & body);
+  HttpResponse enter_shadow_mode();
   HttpResponse jobs_create(const std::string & body);
   HttpResponse jobs_list();
   HttpResponse job_get(const std::string & job_id);
@@ -387,6 +389,7 @@ private:
   rclcpp::Client<vehicle_interfaces::srv::StartEpisode>::SharedPtr start_client_;
   rclcpp::Client<vehicle_interfaces::srv::StopEpisode>::SharedPtr stop_client_;
   rclcpp::Client<vehicle_interfaces::srv::RequestSafeStop>::SharedPtr safe_client_;
+  rclcpp::Client<vehicle_interfaces::srv::RequestControlMode>::SharedPtr mode_client_;
   rclcpp::Client<vehicle_interfaces::srv::CaptureVlaDebug>::SharedPtr debug_capture_client_;
   rclcpp::Client<vehicle_interfaces::srv::RunVlaDebug>::SharedPtr debug_run_client_;
   rclcpp::Client<vehicle_interfaces::srv::ListComponents>::SharedPtr components_client_;
@@ -449,6 +452,7 @@ VehicleOpsApi::VehicleOpsApi() : Node("vehicle_ops_api")
   start_client_ = create_client<vehicle_interfaces::srv::StartEpisode>("/vehicle/start_episode");
   stop_client_ = create_client<vehicle_interfaces::srv::StopEpisode>("/vehicle/stop_episode");
   safe_client_ = create_client<vehicle_interfaces::srv::RequestSafeStop>("/vehicle/request_safe_stop");
+  mode_client_ = create_client<vehicle_interfaces::srv::RequestControlMode>("/vehicle/request_mode");
   debug_capture_client_ = create_client<vehicle_interfaces::srv::CaptureVlaDebug>("/vla/debug/capture");
   debug_run_client_ = create_client<vehicle_interfaces::srv::RunVlaDebug>("/vla/debug/run");
   components_client_ = create_client<vehicle_interfaces::srv::ListComponents>("/vehicle/operations/list_components");
@@ -594,6 +598,9 @@ HttpResponse VehicleOpsApi::route(const HttpRequest & request)
   if (path.rfind("/api/vla-debug/", 0) == 0) {
     const auto denied = authorize(request);
     if (denied) {return *denied;}
+    if (request.method == "POST" && path == "/api/vla-debug/enter-shadow") {
+      return enter_shadow_mode();
+    }
     if (request.method == "POST" && path == "/api/vla-debug/capture") {
       return debug_capture(request.body);
     }
@@ -877,6 +884,27 @@ HttpResponse VehicleOpsApi::safe_stop(const std::string & body)
   }
   const auto response = future.get();
   return response->accepted ? success(response->message) : error(400, response->message);
+}
+HttpResponse VehicleOpsApi::enter_shadow_mode()
+{
+  if (!mode_client_->wait_for_service(250ms)) {
+    return error(503, "Vehicle Supervisor is unavailable");
+  }
+  auto request = std::make_shared<vehicle_interfaces::srv::RequestControlMode::Request>();
+  request->requested_mode = vehicle_interfaces::msg::SystemState::MODE_VLA_SHADOW;
+  request->requester = "vehicle_ops_console";
+  request->reason = "Operator entered VLA shadow debug mode";
+  auto future = mode_client_->async_send_request(request);
+  if (future.wait_for(std::chrono::milliseconds(static_cast<int>(service_seconds_ * 1000))) !=
+    std::future_status::ready)
+  {
+    return error(408, "Control mode request timed out");
+  }
+  const auto response = future.get();
+  if (!response->accepted) {return error(409, response->message);}
+  return success(response->message,
+    "\"mode\":\"VLA_SHADOW\",\"current_mode\":" +
+    std::to_string(response->current_mode));
 }
 HttpResponse VehicleOpsApi::debug_capture(const std::string & body)
 {

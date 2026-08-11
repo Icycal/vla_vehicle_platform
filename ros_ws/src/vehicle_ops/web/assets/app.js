@@ -1,5 +1,5 @@
 const $ = (id) => document.getElementById(id);
-const state = { token: sessionStorage.getItem("vehicleOpsToken") || "", cameraSequence: 0, pipelineCameraSequence: 0, cameraStatus: null, pipelineCameraActive: false, selectedJobId: "", jobs: [], debugRunId: "", debugResult: null, debugImageUrls: {}, pipelineTrace: null, pipelineHistory: [], selectedPipelineStageId: "", selectedPipelineHistoryId: "", inspectorMode: "live", components: [], componentProfiles: [], selectedComponentId: "", storage: null, storageItems: [], selectedStorageCategory: "" };
+const state = { token: sessionStorage.getItem("vehicleOpsToken") || "", cameraSequence: 0, pipelineCameraSequence: 0, cameraStatus: null, pipelineCameraActive: false, selectedJobId: "", jobs: [], debugRunId: "", debugResult: null, debugImageUrls: {}, pipelineTrace: null, pipelineHistory: [], selectedPipelineStageId: "", selectedPipelineHistoryId: "", inspectorMode: "live", components: [], componentProfiles: [], selectedComponentId: "", storage: null, storageItems: [], selectedStorageCategory: "", systemMode: "" };
 const text = (id, value) => { $(id).textContent = value ?? "—"; };
 const number = (value, digits = 1) => Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : "--";
 function setMetricTooltip(valueId, heading, rows) {
@@ -124,9 +124,21 @@ function renderCameraView(camera, ids, sequenceKey, enabled = true) {
   void $(ids.overlay).offsetWidth;
   $(ids.overlay).classList.add("updated");
 }
+function updateDebugModeGuard(system) {
+  const mode = system?.mode_name || "UNKNOWN";
+  const received = Boolean(system?.received);
+  const shadowReady = received && mode === "VLA_SHADOW";
+  state.systemMode = mode;
+  $("debugModeGuard").dataset.state = shadowReady ? "ready" : (received ? "blocked" : "unknown");
+  text("debugModeState", shadowReady ? "VLA_SHADOW · 已允许快照调试" : `${mode} · 尚未进入影子模式`);
+  text("debugModeHint", shadowReady ? "模型输出仅用于观察与对照，不会发布底盘控制命令" : "进入影子模式后才能冻结 Observation 并执行单步推理");
+  $("enterShadowMode").disabled = !received || shadowReady;
+  $("enterShadowMode").textContent = shadowReady ? "已处于影子模式" : "进入影子调试模式";
+}
 function render(data) {
   badge($("connectionBadge"), true, "API ONLINE", "连接中");
   text("modeName", data.system?.mode_name || "NO STATE");
+  updateDebugModeGuard(data.system);
   text("systemMessage", data.system?.message || "尚未收到 Supervisor 状态");
   text("detailSupervisor", data.system?.mode_name ? `${data.system.mode_name} · ${data.system.control_source || "--"}` : "OFFLINE");
   text("detailObservation", data.observation?.ready ? "READY" : freshness(data.observation));
@@ -642,8 +654,29 @@ function renderDebugResult(result) {
     row.insertCell().textContent = number(interpreted[index]?.angular_z, 6);
   }
 }
+async function enterShadowDebugMode() {
+  if (!state.token) { openToken(); throw new Error("请先填写操作令牌"); }
+  if (!confirm("确认进入 VLA_SHADOW 影子调试模式？\n\n该模式允许模型推理和结果对照，但不会把 VLA 输出发布到底盘。")) return;
+  const button = $("enterShadowMode");
+  button.disabled = true;
+  button.textContent = "正在切换…";
+  clearDebugError();
+  try {
+    const result = await jobFetch("/api/vla-debug/enter-shadow", { method: "POST" });
+    toast(result.message || "已进入影子调试模式");
+    await refresh();
+  } catch (error) {
+    showDebugError(error);
+    toast(error.message, true);
+    button.disabled = false;
+    button.textContent = "重新进入影子模式";
+  }
+}
 async function captureDebugObservation() {
   clearDebugError();
+  if (state.systemMode !== "VLA_SHADOW") {
+    throw new Error(`当前为 ${state.systemMode || "UNKNOWN"} 模式，请先点击“进入影子调试模式”`);
+  }
   if (!state.token) { openToken(); throw new Error("请先填写操作令牌"); }
   setDebugBusy(true); setDebugStage("capture", "采集中");
   try {
@@ -788,6 +821,9 @@ $("refreshComponentLog").addEventListener("click", () => {
   if (component) loadComponentLog(component.component_id, component.display_name);
 });
 $("startCameraQuick").addEventListener("click", () => controlComponent("front_camera", "start"));
+$("enterShadowMode").addEventListener("click", () => {
+  enterShadowDebugMode().catch((error) => { showDebugError(error); toast(error.message, true); });
+});
 $("captureDebug").addEventListener("click", async () => {
   try { await captureDebugObservation(); } catch (error) { setDebugStage("capture", "执行失败", "failed"); showDebugError(error); toast(error.message, true); setDebugBusy(false); }
 });
