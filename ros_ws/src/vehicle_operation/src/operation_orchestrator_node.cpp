@@ -355,20 +355,19 @@ private:
     const auto found = components_.find(id);
     if (found == components_.end()) {throw std::invalid_argument("Unknown component: " + id);}
     if (!visited.insert(id).second) {return true;}
-    if (action == "start" || action == "restart") {
+    if ((action == "start" || action == "restart") && !force) {
       for (const auto & dependency : found->second.dependencies) {
         if (!control_component(dependency, "start", false, visited)) {return false;}
       }
     }
-    if (action == "stop") {
+    if (action == "stop" && !force) {
       refresh_states();
       for (const auto & dependent_id : component_order_) {
         const auto & definition = components_.at(dependent_id);
         if (std::find(definition.dependencies.begin(), definition.dependencies.end(), id) == definition.dependencies.end()) {continue;}
         const auto dependent = state_for(dependent_id);
         if (!dependent.managed) {continue;}
-        if (!force) {throw std::runtime_error("Stop dependent component first: " + dependent_id);}
-        if (!control_component(dependent_id, "stop", true, visited)) {return false;}
+        throw std::runtime_error("Stop dependent component first: " + dependent_id);
       }
     }
     if (action != "start" && action != "stop" && action != "restart") {
