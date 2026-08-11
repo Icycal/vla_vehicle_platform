@@ -79,6 +79,35 @@ std::string trim(const std::string & value)
   const auto last = value.find_last_not_of(" \t\r\n");
   return value.substr(first, last - first + 1);
 }
+std::vector<uint8_t> decode_base64(const std::string & encoded)
+{
+  static const std::string alphabet =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  if (encoded.size() > 900000) {throw std::length_error("Uploaded image is too large");}
+  std::vector<uint8_t> output;
+  output.reserve(encoded.size() * 3 / 4);
+  uint32_t accumulator = 0;
+  int bits = 0;
+  for (const unsigned char character : encoded) {
+    if (std::isspace(character)) {continue;}
+    if (character == '=') {break;}
+    const auto position = alphabet.find(static_cast<char>(character));
+    if (position == std::string::npos) {throw std::invalid_argument("Invalid image encoding");}
+    accumulator = (accumulator << 6) | static_cast<uint32_t>(position);
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      output.push_back(static_cast<uint8_t>((accumulator >> bits) & 0xff));
+      accumulator &= bits == 0 ? 0u : ((1u << bits) - 1u);
+    }
+  }
+  if (output.size() > 700000) {throw std::length_error("Uploaded image is too large");}
+  return output;
+}
+bool is_jpeg(const std::vector<uint8_t> & data)
+{
+  return data.size() >= 4 && data[0] == 0xff && data[1] == 0xd8 && data[2] == 0xff;
+}
 std::string json_escape(const std::string & value)
 {
   std::ostringstream output;
@@ -912,7 +941,29 @@ HttpResponse VehicleOpsApi::debug_capture(const std::string & body)
     return error(503, "VLA Debug Orchestrator is unavailable");
   }
   auto request = std::make_shared<vehicle_interfaces::srv::CaptureVlaDebug::Request>();
-  request->task_override = trim(body);
+  const auto content = trim(body);
+  if (!content.empty() && content.front() == '{') {
+    nlohmann::json input;
+    try {input = nlohmann::json::parse(content);}
+    catch (const nlohmann::json::exception &) {return error(400, "Request body must be valid JSON");}
+    if (!input.contains("task") || !input.at("task").is_string()) {
+      return error(400, "task is required");
+    }
+    request->task_override = input.at("task").get<std::string>();
+    if (input.contains("image_base64")) {
+      if (!input.at("image_base64").is_string()) {return error(400, "image_base64 must be a string");}
+      try {request->image_override.data = decode_base64(input.at("image_base64").get<std::string>());}
+      catch (const std::length_error & error_value) {return error(413, error_value.what());}
+      catch (const std::exception & error_value) {return error(400, error_value.what());}
+      if (!is_jpeg(request->image_override.data)) {return error(400, "Uploaded image must be JPEG");}
+      request->use_image_override = true;
+      request->image_override.format = "jpeg";
+      request->image_source_name = input.value("image_name", "uploaded-image.jpg");
+      if (request->image_source_name.size() > 128) {request->image_source_name.resize(128);}
+    }
+  } else {
+    request->task_override = content;
+  }
   auto future = debug_capture_client_->async_send_request(request);
   if (future.wait_for(std::chrono::milliseconds(static_cast<int>(service_seconds_ * 1000))) !=
     std::future_status::ready)

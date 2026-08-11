@@ -174,6 +174,8 @@ private:
   {
     Observation snapshot;
     std::string run_id;
+    std::string input_source{"camera"};
+    std::string image_source_name;
     {
       std::lock_guard<std::mutex> lock(mutex_);
       std::string reason;
@@ -183,6 +185,24 @@ private:
         return;
       }
       snapshot = *latest_observation_;
+      if (request->use_image_override) {
+        const auto & format = request->image_override.format;
+        const bool jpeg_format = format == "jpeg" || format == "jpg" ||
+          format.find("jpeg") != std::string::npos;
+        if (!jpeg_format || request->image_override.data.empty()) {
+          response->message = "Uploaded debug image must be a non-empty JPEG";
+          return;
+        }
+        if (snapshot.images.empty()) {
+          snapshot.images.push_back(request->image_override);
+          snapshot.image_keys.push_back("observation.images.front");
+        } else {
+          snapshot.images.front() = request->image_override;
+        }
+        snapshot.images.front().header.stamp = now();
+        input_source = "upload";
+        image_source_name = request->image_source_name.substr(0, 128);
+      }
       if (!request->task_override.empty()) {snapshot.task = request->task_override;}
       if (snapshot.task.empty()) {response->message = "Task text is required"; return;}
       run_id = make_run_id();
@@ -196,7 +216,9 @@ private:
 
     const auto directory = artifact_root_ / run_id;
     std::filesystem::create_directories(directory);
-    const auto metadata = observation_json(snapshot, run_id);
+    auto metadata = observation_json(snapshot, run_id);
+    metadata["input_source"] = input_source;
+    metadata["image_source_name"] = image_source_name;
     std::ofstream(directory / "observation.json") << std::setw(2) << metadata << '\n';
     if (!snapshot.images.empty()) {
       std::ofstream image(directory / "camera-original.jpg", std::ios::binary);
@@ -207,7 +229,9 @@ private:
     response->run_id = run_id;
     response->directory = directory.string();
     response->observation_json = metadata.dump();
-    response->message = "Observation snapshot captured; no control command was published";
+    response->message = input_source == "upload" ?
+      "Uploaded image snapshot captured; no control command was published" :
+      "Observation snapshot captured; no control command was published";
   }
 
   void run(

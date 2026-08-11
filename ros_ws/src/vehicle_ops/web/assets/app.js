@@ -1,5 +1,5 @@
 const $ = (id) => document.getElementById(id);
-const state = { token: sessionStorage.getItem("vehicleOpsToken") || "", cameraSequence: 0, pipelineCameraSequence: 0, cameraStatus: null, pipelineCameraActive: false, selectedJobId: "", jobs: [], debugRunId: "", debugResult: null, debugImageUrls: {}, pipelineTrace: null, pipelineHistory: [], selectedPipelineStageId: "", selectedPipelineHistoryId: "", inspectorMode: "live", components: [], componentProfiles: [], selectedComponentId: "", storage: null, storageItems: [], selectedStorageCategory: "", systemMode: "" };
+const state = { token: sessionStorage.getItem("vehicleOpsToken") || "", cameraSequence: 0, pipelineCameraSequence: 0, cameraStatus: null, pipelineCameraActive: false, selectedJobId: "", jobs: [], debugRunId: "", debugResult: null, debugImageUrls: {}, pipelineTrace: null, pipelineHistory: [], selectedPipelineStageId: "", selectedPipelineHistoryId: "", inspectorMode: "live", components: [], componentProfiles: [], selectedComponentId: "", storage: null, storageItems: [], selectedStorageCategory: "", systemMode: "", debugInputSource: "camera", debugUpload: null, observationWidth: 640, observationHeight: 480 };
 const text = (id, value) => { $(id).textContent = value ?? "—"; };
 const number = (value, digits = 1) => Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : "--";
 function setMetricTooltip(valueId, heading, rows) {
@@ -150,6 +150,8 @@ function render(data) {
   text("policyMeta", data.policy?.model_id || data.policy?.message || "等待 Provider");
   text("episodeState", data.episode?.state_name || freshness(data.episode));
   text("episodeMeta", data.episode?.message || "等待 Episode Recorder");
+  state.observationWidth = Number(data.observation?.image_width || 640);
+  state.observationHeight = Number(data.observation?.image_height || 480);
   const totalMemory = Number(data.host?.memory_total_mb || 0);
   const usedMemory = totalMemory - Number(data.host?.memory_available_mb || 0);
   const memoryRatio = totalMemory ? usedMemory / totalMemory * 100 : NaN;
@@ -585,7 +587,8 @@ function showDebugError(error) {
   $("debugError").hidden = false;
   text("debugErrorMessage", error.message || String(error));
 }function setDebugBusy(busy) {
-  $("captureDebug").disabled = busy;
+  const uploadMissing = state.debugInputSource === "upload" && !state.debugUpload;
+  $("captureDebug").disabled = busy || uploadMissing;
   $("preprocessDebug").disabled = busy || !state.debugRunId;
   $("inferenceDebug").disabled = busy || !state.debugRunId;
 }
@@ -601,6 +604,66 @@ function setDebugStage(stage, label, stateClass = "running") {
   });
   $("debugStageState").className = `job-state ${stateClass}`;
   $("debugStageState").textContent = label;
+}
+function setDebugInputSource(source) {
+  state.debugInputSource = source === "upload" ? "upload" : "camera";
+  document.querySelectorAll("[data-debug-source]").forEach((button) => {
+    const active = button.dataset.debugSource === state.debugInputSource;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", String(active));
+  });
+  $("debugUploadPanel").hidden = state.debugInputSource !== "upload";
+  text("debugOriginalCaption", state.debugInputSource === "upload" ? "冻结的用户上传图像" : "冻结的原始相机帧");
+  $("captureDebug").textContent = state.debugInputSource === "upload" ? "使用上传图片" : "采集当前帧";
+  setDebugBusy(false);
+}
+function clearDebugUpload() {
+  state.debugUpload = null;
+  $("debugUploadInput").value = "";
+  $("debugUploadPreview").removeAttribute("src");
+  $("debugUploadPreview").style.display = "none";
+  $("debugUploadPlaceholder").style.display = "block";
+  text("debugUploadName", "尚未选择图片");
+  text("debugUploadInfo", "将归一到当前相机分辨率并转换为 JPEG");
+  $("clearDebugUpload").disabled = true;
+  setDebugBusy(false);
+}
+async function prepareDebugUpload(file) {
+  if (!file) return;
+  if (!file.type.startsWith("image/")) throw new Error("请选择 JPG、PNG 或 WebP 图片");
+  if (file.size > 12 * 1024 * 1024) throw new Error("原始图片不能超过 12 MB");
+  const bitmap = await createImageBitmap(file);
+  const originalWidth = bitmap.width;
+  const originalHeight = bitmap.height;
+  const width = Math.max(1, state.observationWidth || 640);
+  const height = Math.max(1, state.observationHeight || 480);
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  context.fillStyle = "#000";
+  context.fillRect(0, 0, width, height);
+  const scale = Math.min(width / originalWidth, height / originalHeight);
+  const drawWidth = Math.round(originalWidth * scale);
+  const drawHeight = Math.round(originalHeight * scale);
+  context.drawImage(bitmap, Math.round((width - drawWidth) / 2), Math.round((height - drawHeight) / 2), drawWidth, drawHeight);
+  bitmap.close();
+  let quality = .9;
+  let dataUrl = canvas.toDataURL("image/jpeg", quality);
+  while (dataUrl.length > 900000 && quality > .55) {
+    quality -= .1;
+    dataUrl = canvas.toDataURL("image/jpeg", quality);
+  }
+  const base64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
+  if (base64.length > 900000) throw new Error("图片压缩后仍然过大，请选择尺寸更小的图片");
+  state.debugUpload = { base64, name: file.name, width, height, originalWidth, originalHeight };
+  $("debugUploadPreview").src = dataUrl;
+  $("debugUploadPreview").style.display = "block";
+  $("debugUploadPlaceholder").style.display = "none";
+  text("debugUploadName", file.name);
+  text("debugUploadInfo", `${originalWidth} × ${originalHeight} → ${width} × ${height} · JPEG · ${Math.round(base64.length * .75 / 1024)} KB`);
+  $("clearDebugUpload").disabled = false;
+  setDebugBusy(false);
 }
 function resetDebugImages() {
   [["original", "debugOriginalImage", "debugOriginalEmpty"], ["processed", "debugProcessedImage", "debugProcessedEmpty"]]
@@ -696,9 +759,16 @@ async function captureDebugObservation() {
   text("debugOriginalEmpty", "正在冻结当前 Observation");
   text("debugProcessedEmpty", "采集完成后，请点击“只执行预处理”生成右侧图像");
   try {
-    const result = await jobFetch("/api/vla-debug/capture", {
-      method: "POST", headers: { "Content-Type": "text/plain;charset=UTF-8" },
-      body: $("debugTask").value.trim()
+    const task = $("debugTask").value.trim();
+    if (state.debugInputSource === "upload" && !state.debugUpload) {
+      throw new Error("请先选择一张用于调试的图片");
+    }
+    const upload = state.debugInputSource === "upload" ? state.debugUpload : null;
+    const result = await jobFetch("/api/vla-debug/capture", upload ? {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ task, image_base64: upload.base64, image_name: upload.name })
+    } : {
+      method: "POST", headers: { "Content-Type": "text/plain;charset=UTF-8" }, body: task
     });
     state.debugRunId = result.run_id;
     text("debugRunId", result.run_id);
@@ -706,7 +776,8 @@ async function captureDebugObservation() {
     $("copyDebugJson").disabled = false;
     $("debugActionRows").innerHTML = '<tr><td colspan="4">输入已冻结，可以执行预处理或单次推理。</td></tr>';
     await loadDebugImage("original", "debugOriginalImage", "debugOriginalEmpty");
-    setDebugStage("capture", "输入已冻结", "succeeded");
+    text("debugOriginalCaption", result.observation?.input_source === "upload" ? "冻结的用户上传图像" : "冻结的原始相机帧");
+    setDebugStage("capture", result.observation?.input_source === "upload" ? "上传图已冻结" : "输入已冻结", "succeeded");
     toast(result.message);
   } finally { setDebugBusy(false); }
 }
@@ -837,6 +908,21 @@ $("refreshComponentLog").addEventListener("click", () => {
   if (component) loadComponentLog(component.component_id, component.display_name);
 });
 $("startCameraQuick").addEventListener("click", () => controlComponent("front_camera", "start"));
+document.querySelectorAll("[data-debug-source]").forEach((button) => button.addEventListener("click", () => setDebugInputSource(button.dataset.debugSource)));
+$("debugUploadInput").addEventListener("change", async (event) => {
+  try { await prepareDebugUpload(event.target.files?.[0]); }
+  catch (error) { clearDebugUpload(); showDebugError(error); toast(error.message, true); }
+});
+$("clearDebugUpload").addEventListener("click", clearDebugUpload);
+$("debugUploadDropzone").addEventListener("dragover", (event) => { event.preventDefault(); $("debugUploadDropzone").classList.add("dragging"); });
+$("debugUploadDropzone").addEventListener("dragleave", () => $("debugUploadDropzone").classList.remove("dragging"));
+$("debugUploadDropzone").addEventListener("drop", async (event) => {
+  event.preventDefault();
+  $("debugUploadDropzone").classList.remove("dragging");
+  try { await prepareDebugUpload(event.dataTransfer?.files?.[0]); }
+  catch (error) { clearDebugUpload(); showDebugError(error); toast(error.message, true); }
+});
+setDebugInputSource("camera");
 $("enterShadowMode").addEventListener("click", () => {
   enterShadowDebugMode().catch((error) => { showDebugError(error); toast(error.message, true); });
 });

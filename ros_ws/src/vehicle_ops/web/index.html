@@ -45,6 +45,20 @@
       <article class="panel debug-controller">
         <div class="section-heading"><div><p class="eyebrow">可复现快照 · REPRODUCIBLE SNAPSHOT</p><h2>快照单步调试</h2></div><span class="pill neutral" id="debugSafetyBadge"><i></i>仅影子模式 · SHADOW</span></div>
         <p class="debug-intro">冻结同一份 Observation，分别检查契约、预处理、推理、反归一化和动作解释。任何阶段都不会发布控制命令。</p>
+        <div class="debug-input-source">
+          <div class="debug-source-tabs" role="tablist" aria-label="快照图像来源">
+            <button type="button" class="debug-source-tab active" data-debug-source="camera" role="tab" aria-selected="true">当前相机帧<span>Live Camera</span></button>
+            <button type="button" class="debug-source-tab" data-debug-source="upload" role="tab" aria-selected="false">上传图片<span>Local Image</span></button>
+          </div>
+          <div class="debug-upload-panel" id="debugUploadPanel" hidden>
+            <label class="debug-upload-dropzone" id="debugUploadDropzone">
+              <input id="debugUploadInput" type="file" accept="image/jpeg,image/png,image/webp" hidden>
+              <img id="debugUploadPreview" alt="待调试的上传图片预览">
+              <span class="debug-upload-placeholder" id="debugUploadPlaceholder"><strong>点击选择或拖入图片</strong><small>支持 JPG、PNG、WebP；仅在点击采集时上传</small></span>
+            </label>
+            <div class="debug-upload-meta"><span><strong id="debugUploadName">尚未选择图片</strong><small id="debugUploadInfo">将归一到当前相机分辨率并转换为 JPEG</small></span><button type="button" class="button ghost" id="clearDebugUpload" disabled>清除</button></div>
+          </div>
+        </div>
         <label>调试任务<textarea id="debugTask" rows="3" placeholder="例如：move forward and avoid obstacles">move forward and avoid obstacles</textarea></label>
         <div class="debug-steps debug-steps-expanded">
           <div class="debug-step active" id="debugStepCapture"><span>1</span><strong>冻结输入</strong><small>相机与车辆状态</small></div>
@@ -65,7 +79,7 @@
       </article>
       <article class="panel debug-images">
         <div class="section-heading"><div><p class="eyebrow">图像输入 · VISUAL INPUT</p><h2>图像对照</h2></div><span class="job-state neutral" id="debugStageState">未开始</span></div>
-        <div class="debug-image-grid"><figure><figcaption>冻结的原始相机帧</figcaption><div class="debug-image-frame"><img id="debugOriginalImage" alt="调试原始相机帧"><span id="debugOriginalEmpty">等待冻结 Observation</span></div></figure><figure><figcaption>Provider 处理后图像</figcaption><div class="debug-image-frame"><img id="debugProcessedImage" alt="模型处理后图像"><span id="debugProcessedEmpty">执行预处理后显示</span></div></figure></div>
+        <div class="debug-image-grid"><figure><figcaption id="debugOriginalCaption">冻结的原始相机帧</figcaption><div class="debug-image-frame"><img id="debugOriginalImage" alt="调试原始相机帧"><span id="debugOriginalEmpty">等待冻结 Observation</span></div></figure><figure><figcaption>Provider 处理后图像</figcaption><div class="debug-image-frame"><img id="debugProcessedImage" alt="模型处理后图像"><span id="debugProcessedEmpty">执行预处理后显示</span></div></figure></div>
       </article>
       <article class="panel debug-actions">
         <div class="section-heading"><div><p class="eyebrow">动作原始输出 · RAW ACTION OUTPUT</p><h2>动作原始值</h2></div><span id="debugActionShape" class="job-state neutral">Shape --</span></div>

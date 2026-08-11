@@ -1,4 +1,7 @@
 string task_override
+bool use_image_override
+sensor_msgs/CompressedImage image_override
+string image_source_name
 ---
 bool accepted
 string run_id

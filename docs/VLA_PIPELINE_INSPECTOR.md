@@ -16,7 +16,8 @@ VLA Pipeline Inspector 是 Vehicle Ops Console 中的 Shadow-only 单步调试�
 ## 2. 架构
 
 ```text
-/camera/image_compressed + vehicle state + /vla/task
+/camera/image_compressed 或用户上传图片
+              + vehicle state + /vla/task
                          |
                          v
                  observation_adapter
@@ -84,13 +85,31 @@ http://10.101.70.232:8088
 
 进入 **VLA 调试** 页面后：
 
-### 4.1 冻结当前输入
+### 4.1 选择并冻结当前输入
 
-1. 填写任务文本，例如 `move forward and avoid obstacles`；
-2. 点击 **冻结当前 Observation**；
-3. 页面生成唯一 `run_id`，并显示冻结的原始相机图像和 Observation JSON。
+调试台支持两种视觉输入来源：
 
-冻结后即使实时相机继续更新，本次预处理和推理仍使用同一份快照，便于复现和对比。
+- **当前相机帧**：冻结最新 `/vla/observation` 中的主摄像头图像；
+- **上传图片**：选择或拖入 JPG、PNG、WebP。浏览器会将图片等比例适配到当前相机分辨率、填充黑边并转换为 JPEG，只有点击采集时才上传。
+
+操作步骤：
+
+1. 选择 **当前相机帧** 或 **上传图片**；
+2. 上传模式下选择图片并检查本地预览、原始尺寸、归一化尺寸和预计上传大小；
+3. 填写任务文本，例如 `move forward and avoid obstacles`；
+4. 点击 **采集当前帧** 或 **使用上传图片**；
+5. 页面生成唯一 `run_id`，并显示冻结图像和 Observation JSON。
+
+上传图片只替换 Observation 的主视觉输入；任务文本、车辆状态和其他契约字段仍来自同一时刻的当前 Observation。因此上传模式仍要求 Observation 链路可用。冻结后即使实时相机继续更新，本次预处理和推理也始终使用同一份快照。
+
+`observation.json` 中通过以下字段标识来源：
+
+```json
+{
+  "input_source": "camera | upload",
+  "image_source_name": "上传文件名，camera 模式为空"
+}
+```
 
 ### 4.2 仅执行预处理
 
@@ -194,6 +213,24 @@ curl -H 'X-Ops-Token: <operator-token>' \
   --data 'move forward and avoid obstacles' \
   http://127.0.0.1:8088/api/vla-debug/capture
 ```
+
+### 上传图片并冻结 Observation
+
+```bash
+IMAGE_BASE64="$(base64 -w0 input.jpg)"
+
+jq -n \
+  --arg task "move forward and avoid obstacles" \
+  --arg image_base64 "${IMAGE_BASE64}" \
+  --arg image_name "input.jpg" \
+  '{task:$task,image_base64:$image_base64,image_name:$image_name}' | \
+  curl -H 'X-Ops-Token: <operator-token>' \
+    -H 'Content-Type: application/json' \
+    --data-binary @- \
+    http://127.0.0.1:8088/api/vla-debug/capture
+```
+
+HTTP API 只接受 JPEG 字节；网页端会自动完成 PNG/WebP 到 JPEG 的转换和尺寸归一化。解码后的图片上限为约 700 KB。
 
 ### 仅预处理
 
