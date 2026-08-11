@@ -561,7 +561,7 @@ void VehicleOpsApi::send_response(int client, const HttpResponse & response) con
   headers << "Content-Type: " << response.content_type << "\r\n";
   headers << "Content-Length: " << response.body.size() << "\r\n";
   headers << "Connection: close\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\n";
-  headers << "Content-Security-Policy: default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; object-src 'none'; base-uri 'none'\r\n";
+  headers << "Content-Security-Policy: default-src 'self'; img-src 'self' data: blob:; style-src 'self'; script-src 'self'; object-src 'none'; base-uri 'none'\r\n";
   for (const auto & item : response.headers) {headers << item.first << ": " << item.second << "\r\n";}
   headers << "\r\n";
   send_all(client, headers.str());

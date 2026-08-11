@@ -602,6 +602,19 @@ function setDebugStage(stage, label, stateClass = "running") {
   $("debugStageState").className = `job-state ${stateClass}`;
   $("debugStageState").textContent = label;
 }
+function resetDebugImages() {
+  [["original", "debugOriginalImage", "debugOriginalEmpty"], ["processed", "debugProcessedImage", "debugProcessedEmpty"]]
+    .forEach(([kind, imageId, emptyId]) => {
+      if (state.debugImageUrls[kind]) URL.revokeObjectURL(state.debugImageUrls[kind]);
+      delete state.debugImageUrls[kind];
+      $(imageId).removeAttribute("src");
+      $(imageId).style.display = "none";
+      $(emptyId).style.display = "grid";
+    });
+  $("pipelineProcessedImage").removeAttribute("src");
+  $("pipelineProcessedImage").style.display = "none";
+  $("pipelineProcessedEmpty").style.display = "grid";
+}
 async function loadDebugImage(kind, imageId, emptyId) {
   if (!state.debugRunId) return;
   const response = await fetch(`/api/vla-debug/runs/${encodeURIComponent(state.debugRunId)}/${kind}.jpg`, {
@@ -679,6 +692,9 @@ async function captureDebugObservation() {
   }
   if (!state.token) { openToken(); throw new Error("请先填写操作令牌"); }
   setDebugBusy(true); setDebugStage("capture", "采集中");
+  resetDebugImages();
+  text("debugOriginalEmpty", "正在冻结当前 Observation");
+  text("debugProcessedEmpty", "采集完成后，请点击“只执行预处理”生成右侧图像");
   try {
     const result = await jobFetch("/api/vla-debug/capture", {
       method: "POST", headers: { "Content-Type": "text/plain;charset=UTF-8" },
