@@ -212,19 +212,91 @@ std::string policy_name(uint8_t state)
     default: return "UNKNOWN";
   }
 }
-struct HostMetrics {double load{0.0}; double total{0.0}; double available{0.0}; double uptime{0.0};};
+double numeric_file(const std::filesystem::path & path)
+{
+  double value = 0.0;
+  std::ifstream(path) >> value;
+  return value;
+}
+
+double thermal_temperature(const std::string & expected_type)
+{
+  std::error_code error;
+  const std::filesystem::path thermal_root("/sys/class/thermal");
+  if (!std::filesystem::is_directory(thermal_root, error)) {return 0.0;}
+  for (const auto & entry : std::filesystem::directory_iterator(
+    thermal_root, std::filesystem::directory_options::skip_permission_denied, error))
+  {
+    std::ifstream type_stream(entry.path() / "type");
+    std::string type;
+    std::getline(type_stream, type);
+    if (trim(type) == expected_type) {return numeric_file(entry.path() / "temp") / 1000.0;}
+  }
+  return 0.0;
+}
+
+double cpu_usage_percent()
+{
+  std::ifstream stream("/proc/stat");
+  std::string label;
+  std::uint64_t user = 0, nice = 0, system = 0, idle = 0, io_wait = 0;
+  std::uint64_t irq = 0, soft_irq = 0, steal = 0;
+  stream >> label >> user >> nice >> system >> idle >> io_wait >> irq >> soft_irq >> steal;
+  const std::uint64_t idle_ticks = idle + io_wait;
+  const std::uint64_t total_ticks = user + nice + system + idle + io_wait + irq + soft_irq + steal;
+  static std::mutex sample_mutex;
+  static std::uint64_t previous_idle = 0;
+  static std::uint64_t previous_total = 0;
+  std::lock_guard<std::mutex> lock(sample_mutex);
+  const auto total_delta = total_ticks - previous_total;
+  const auto idle_delta = idle_ticks - previous_idle;
+  previous_idle = idle_ticks;
+  previous_total = total_ticks;
+  if (total_delta == 0) {return 0.0;}
+  return 100.0 * static_cast<double>(total_delta - std::min(idle_delta, total_delta)) /
+    static_cast<double>(total_delta);
+}
+
+struct HostMetrics
+{
+  double load{0.0};
+  double total{0.0};
+  double available{0.0};
+  double swap_total{0.0};
+  double swap_free{0.0};
+  double uptime{0.0};
+  double cpu_usage{0.0};
+  double cpu_temperature{0.0};
+  double gpu_usage{0.0};
+  double gpu_temperature{0.0};
+  double gpu_frequency_mhz{0.0};
+  std::uint32_t cpu_cores{0};
+};
+
 HostMetrics host_metrics()
 {
   HostMetrics metrics;
   std::ifstream("/proc/loadavg") >> metrics.load;
   std::ifstream("/proc/uptime") >> metrics.uptime;
   std::ifstream stream("/proc/meminfo");
-  std::string key, unit;
-  double value = 0.0;
-  while (stream >> key >> value >> unit) {
+  std::string line;
+  while (std::getline(stream, line)) {
+    std::istringstream values(line);
+    std::string key;
+    double value = 0.0;
+    values >> key >> value;
     if (key == "MemTotal:") {metrics.total = value / 1024.0;}
     if (key == "MemAvailable:") {metrics.available = value / 1024.0;}
+    if (key == "SwapTotal:") {metrics.swap_total = value / 1024.0;}
+    if (key == "SwapFree:") {metrics.swap_free = value / 1024.0;}
   }
+  metrics.cpu_usage = cpu_usage_percent();
+  metrics.cpu_temperature = thermal_temperature("cpu-thermal");
+  metrics.gpu_temperature = thermal_temperature("gpu-thermal");
+  metrics.gpu_usage = numeric_file("/sys/devices/platform/bus@0/17000000.gpu/load") / 10.0;
+  metrics.gpu_frequency_mhz = numeric_file(
+    "/sys/devices/platform/bus@0/17000000.gpu/devfreq/17000000.gpu/cur_freq") / 1000000.0;
+  metrics.cpu_cores = std::thread::hardware_concurrency();
   return metrics;
 }
 }  // namespace
@@ -936,8 +1008,19 @@ std::string VehicleOpsApi::status_json()
   out << std::fixed << std::setprecision(2);
   out << "{\"schema_version\":\"vehicle.ops.status.v1\",";
   out << "\"server\":{\"write_enabled\":" << (!token_.empty() ? "true" : "false") << "},";
-  out << "\"host\":{\"load_one\":" << host.load << ",\"memory_total_mb\":" << host.total <<
-    ",\"memory_available_mb\":" << host.available << ",\"uptime_seconds\":" << host.uptime << "},";  out << "\"system\":{\"received\":" << (system_.message ? "true" : "false") <<
+  out << "\"host\":{\"load_one\":" << host.load <<
+    ",\"cpu_usage_percent\":" << host.cpu_usage <<
+    ",\"cpu_temperature_c\":" << host.cpu_temperature <<
+    ",\"cpu_cores\":" << host.cpu_cores <<
+    ",\"memory_total_mb\":" << host.total <<
+    ",\"memory_available_mb\":" << host.available <<
+    ",\"swap_total_mb\":" << host.swap_total <<
+    ",\"swap_free_mb\":" << host.swap_free <<
+    ",\"gpu_usage_percent\":" << host.gpu_usage <<
+    ",\"gpu_temperature_c\":" << host.gpu_temperature <<
+    ",\"gpu_frequency_mhz\":" << host.gpu_frequency_mhz <<
+    ",\"gpu_memory_mode\":\"unified\""
+    ",\"uptime_seconds\":" << host.uptime << "},";  out << "\"system\":{\"received\":" << (system_.message ? "true" : "false") <<
     ",\"fresh\":" << (fresh(system_age) ? "true" : "false") << ",\"age_ms\":" << system_age;
   if (system_.message) {
     const auto & m = *system_.message;

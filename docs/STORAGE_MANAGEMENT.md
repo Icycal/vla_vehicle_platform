@@ -12,7 +12,7 @@
 
 ## 3. 分类
 
-配置文件为 `ros_ws/src/vehicle_storage/config/storage.yaml`，生产部署可通过安装空间中的同名参数文件加载。当前分类包括 Episode、LeRobot Dataset、导出包、VLA 调试记录、工程任务、组件日志、ROS 构建日志、测试数据、训练输出和模型缓存。
+配置文件为 `ros_ws/src/vehicle_storage/config/storage.yaml`，生产部署可通过安装空间中的同名参数文件加载。当前分类包括 Episode、训练数据集、数据导出包、模型调试记录、工程任务、组件日志、ROS 构建日志、测试数据、训练输出和模型资产。分类 ID、显示名称、路径和清理权限全部来自 YAML 参数，不写死在网页或存储节点中。当前训练数据路径仍指向 `datasets/lerobot`，切换到 OpenVLA 或其他训练格式时只需调整配置路径，无需修改 C++ 或网页代码。
 
 模型分类默认只读。正在录制或结束写入中的 Episode、处于 queued/running 的 Job 禁止删除。组件日志采用截断方式释放空间，不删除被 systemd 打开的日志文件。
 

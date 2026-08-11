@@ -3,17 +3,17 @@ storage_manager:
     project_root: /home/wheeltec/vla_vehicle_platform
     warning_used_percent: 80.0
     critical_used_percent: 90.0
-    category_ids: [episodes, lerobot_datasets, exports, debug_runs, jobs, component_logs, build_logs, test_artifacts, training_runs, models]
+    category_ids: [episodes, training_datasets, exports, debug_runs, jobs, component_logs, build_logs, test_artifacts, training_runs, model_assets]
     categories.episodes.display_name: "Episode 原始数据"
     categories.episodes.path: datasets/episodes
     categories.episodes.cleanup_allowed: true
-    categories.lerobot_datasets.display_name: "LeRobot 数据集"
-    categories.lerobot_datasets.path: datasets/lerobot
-    categories.lerobot_datasets.cleanup_allowed: true
+    categories.training_datasets.display_name: "训练数据集"
+    categories.training_datasets.path: datasets/lerobot
+    categories.training_datasets.cleanup_allowed: true
     categories.exports.display_name: "Dataset 导出包"
     categories.exports.path: datasets/exports
     categories.exports.cleanup_allowed: true
-    categories.debug_runs.display_name: "VLA 调试记录"
+    categories.debug_runs.display_name: "模型调试记录"
     categories.debug_runs.path: run/ops/debug
     categories.debug_runs.cleanup_allowed: true
     categories.jobs.display_name: "工程任务记录"
@@ -31,6 +31,6 @@ storage_manager:
     categories.training_runs.display_name: "训练输出"
     categories.training_runs.path: run/training
     categories.training_runs.cleanup_allowed: true
-    categories.models.display_name: "模型与缓存"
-    categories.models.path: run/models
-    categories.models.cleanup_allowed: false
+    categories.model_assets.display_name: "模型资产与缓存"
+    categories.model_assets.path: run/models
+    categories.model_assets.cleanup_allowed: false
