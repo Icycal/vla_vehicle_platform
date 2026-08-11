@@ -18,6 +18,7 @@
   <exec_depend>vehicle_ops</exec_depend>
   <exec_depend>vehicle_pipeline_trace</exec_depend>
   <exec_depend>vehicle_runtime</exec_depend>
+  <exec_depend>vehicle_storage</exec_depend>
   <exec_depend>vehicle_vla_debug</exec_depend>
 
   <export>

@@ -13,6 +13,7 @@
   <depend>std_msgs</depend>
   <depend>vehicle_interfaces</depend>
   <exec_depend>vehicle_operation</exec_depend>
+  <exec_depend>vehicle_storage</exec_depend>
   <depend>nlohmann_json</depend>
 
   <test_depend>ament_lint_auto</test_depend>

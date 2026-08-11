@@ -1,0 +1,8 @@
+string category_id
+string[] item_ids
+bool dry_run
+---
+bool accepted
+uint64 bytes
+uint64 item_count
+string message

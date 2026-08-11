@@ -9,6 +9,11 @@
     <param from="$(find-pkg-share vehicle_operation)/config/components.yaml"/>
   </node>
 
+  <node pkg="vehicle_storage" exec="storage_manager" name="storage_manager" output="screen">
+    <param from="$(find-pkg-share vehicle_storage)/config/storage.yaml"/>
+    <param name="project_root" value="$(var project_root)"/>
+  </node>
+
   <node pkg="vehicle_ops" exec="vehicle_ops_api" name="vehicle_ops_api" output="screen">
     <param from="$(find-pkg-share vehicle_ops)/config/vehicle_ops.yaml"/>
     <param name="bind_address" value="$(var bind_address)"/>

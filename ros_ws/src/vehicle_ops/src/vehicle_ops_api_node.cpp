@@ -21,6 +21,9 @@
 #include <vehicle_interfaces/srv/read_component_log.hpp>
 #include <vehicle_interfaces/srv/list_components.hpp>
 #include <vehicle_interfaces/srv/run_vla_debug.hpp>
+#include <vehicle_interfaces/srv/get_storage_status.hpp>
+#include <vehicle_interfaces/srv/list_storage_items.hpp>
+#include <vehicle_interfaces/srv/cleanup_storage.hpp>
 #include <nlohmann/json.hpp>
 #include "job_manager.hpp"
 #include <algorithm>
@@ -261,6 +264,9 @@ private:
   HttpResponse component_control(const std::string & body);
   HttpResponse profile_control(const std::string & body);
   HttpResponse component_log(const std::string & component_id);
+  HttpResponse storage_status();
+  HttpResponse storage_items(const std::string & category_id);
+  HttpResponse storage_cleanup(const std::string & body);
   HttpResponse task(const std::string & body);
   HttpResponse start_episode(const std::string & body);
   HttpResponse stop_episode();
@@ -315,6 +321,9 @@ private:
   rclcpp::Client<vehicle_interfaces::srv::ControlComponent>::SharedPtr component_control_client_;
   rclcpp::Client<vehicle_interfaces::srv::ControlProfile>::SharedPtr profile_control_client_;
   rclcpp::Client<vehicle_interfaces::srv::ReadComponentLog>::SharedPtr component_log_client_;
+  rclcpp::Client<vehicle_interfaces::srv::GetStorageStatus>::SharedPtr storage_status_client_;
+  rclcpp::Client<vehicle_interfaces::srv::ListStorageItems>::SharedPtr storage_items_client_;
+  rclcpp::Client<vehicle_interfaces::srv::CleanupStorage>::SharedPtr storage_cleanup_client_;
 };
 VehicleOpsApi::VehicleOpsApi() : Node("vehicle_ops_api")
 {
@@ -374,6 +383,9 @@ VehicleOpsApi::VehicleOpsApi() : Node("vehicle_ops_api")
   component_control_client_ = create_client<vehicle_interfaces::srv::ControlComponent>("/vehicle/operations/control_component");
   profile_control_client_ = create_client<vehicle_interfaces::srv::ControlProfile>("/vehicle/operations/control_profile");
   component_log_client_ = create_client<vehicle_interfaces::srv::ReadComponentLog>("/vehicle/operations/read_component_log");
+  storage_status_client_ = create_client<vehicle_interfaces::srv::GetStorageStatus>("/vehicle/storage/get_status");
+  storage_items_client_ = create_client<vehicle_interfaces::srv::ListStorageItems>("/vehicle/storage/list_items");
+  storage_cleanup_client_ = create_client<vehicle_interfaces::srv::CleanupStorage>("/vehicle/storage/cleanup");
   jobs_ = std::make_unique<vehicle_ops::JobManager>(project_root_, jobs_root_);
   start_server();
   RCLCPP_INFO(get_logger(), "Vehicle Ops listening on http://%s:%d", bind_.c_str(), port_);
@@ -491,6 +503,12 @@ HttpResponse VehicleOpsApi::route(const HttpRequest & request)
   if (request.method == "GET" && path == "/api/pipeline/live") {return pipeline_live();}
   if (request.method == "GET" && path == "/api/pipeline/history") {return pipeline_history();}
   if (request.method == "GET" && path == "/api/components") {return components_list();}
+  if (request.method == "GET" && path == "/api/storage") {return storage_status();}
+  if (request.method == "GET" && path.rfind("/api/storage/items/", 0) == 0) {
+    const auto denied = authorize(request);
+    if (denied) {return *denied;}
+    return storage_items(path.substr(19));
+  }
   if (path.rfind("/api/components/", 0) == 0 && path.size() > 20 && path.rfind("/log") == path.size() - 4) {
     const auto denied = authorize(request);
     if (denied) {return *denied;}
@@ -542,6 +560,7 @@ HttpResponse VehicleOpsApi::route(const HttpRequest & request)
     if (path == "/api/episode/start") {return start_episode(request.body);}
     if (path == "/api/episode/stop") {return stop_episode();}
     if (path == "/api/safe-stop") {return safe_stop(request.body);}
+    if (path == "/api/storage/cleanup") {return storage_cleanup(request.body);}
   }
   if (request.method == "GET") {return static_file(path);}
   return error(405, "Unsupported endpoint");
@@ -659,6 +678,80 @@ HttpResponse VehicleOpsApi::component_log(const std::string & component_id)
   if (!response->accepted) {return error(404, response->message);}
   return {200, "text/plain; charset=utf-8", response->content, {{"Cache-Control", "no-store"}}};
 }
+
+HttpResponse VehicleOpsApi::storage_status()
+{
+  if (!storage_status_client_->wait_for_service(250ms)) {return error(503, "Storage Manager is unavailable");}
+  auto future = storage_status_client_->async_send_request(
+    std::make_shared<vehicle_interfaces::srv::GetStorageStatus::Request>());
+  if (future.wait_for(std::chrono::milliseconds(static_cast<int>(service_seconds_ * 3000))) != std::future_status::ready) {
+    return error(408, "Storage status request timed out");
+  }
+  const auto response = future.get();
+  nlohmann::json categories = nlohmann::json::array();
+  for (const auto & category : response->categories) {
+    categories.push_back({
+      {"category_id", category.category_id}, {"display_name", category.display_name},
+      {"path", category.path}, {"bytes", category.bytes}, {"item_count", category.item_count},
+      {"cleanup_allowed", category.cleanup_allowed}, {"automatic_cleanup", category.automatic_cleanup},
+      {"message", category.message}});
+  }
+  nlohmann::json value = {
+    {"total_bytes", response->total_bytes}, {"used_bytes", response->used_bytes},
+    {"available_bytes", response->available_bytes}, {"used_percent", response->used_percent},
+    {"level", response->level}, {"message", response->message}, {"categories", categories}};
+  return {200, "application/json; charset=utf-8", value.dump() + "\n", {{"Cache-Control", "no-store"}}};
+}
+
+HttpResponse VehicleOpsApi::storage_items(const std::string & category_id)
+{
+  if (category_id.empty()) {return error(400, "Storage category is required");}
+  if (!storage_items_client_->wait_for_service(250ms)) {return error(503, "Storage Manager is unavailable");}
+  auto request = std::make_shared<vehicle_interfaces::srv::ListStorageItems::Request>();
+  request->category_id = category_id;
+  auto future = storage_items_client_->async_send_request(request);
+  if (future.wait_for(std::chrono::milliseconds(static_cast<int>(service_seconds_ * 3000))) != std::future_status::ready) {
+    return error(408, "Storage item request timed out");
+  }
+  const auto response = future.get();
+  if (!response->accepted) {return error(404, response->message);}
+  nlohmann::json items = nlohmann::json::array();
+  for (const auto & item : response->items) {
+    items.push_back({
+      {"item_id", item.item_id}, {"display_name", item.display_name}, {"path", item.path},
+      {"bytes", item.bytes}, {"modified_at", {{"sec", item.modified_at.sec}, {"nanosec", item.modified_at.nanosec}}},
+      {"protected", item.is_protected}, {"message", item.message}});
+  }
+  return {200, "application/json; charset=utf-8",
+    nlohmann::json({{"category_id", category_id}, {"items", items}}).dump() + "\n",
+    {{"Cache-Control", "no-store"}}};
+}
+
+HttpResponse VehicleOpsApi::storage_cleanup(const std::string & body)
+{
+  nlohmann::json input;
+  try {input = nlohmann::json::parse(body);}
+  catch (const nlohmann::json::exception &) {return error(400, "Request body must be valid JSON");}
+  if (!input.contains("category_id") || !input.at("category_id").is_string() ||
+    !input.contains("item_ids") || !input.at("item_ids").is_array())
+  {return error(400, "category_id and item_ids are required");}
+  auto request = std::make_shared<vehicle_interfaces::srv::CleanupStorage::Request>();
+  request->category_id = input.at("category_id").get<std::string>();
+  request->item_ids = input.at("item_ids").get<std::vector<std::string>>();
+  request->dry_run = input.value("dry_run", true);
+  if (!storage_cleanup_client_->wait_for_service(250ms)) {return error(503, "Storage Manager is unavailable");}
+  auto future = storage_cleanup_client_->async_send_request(request);
+  if (future.wait_for(std::chrono::milliseconds(static_cast<int>(service_seconds_ * 5000))) != std::future_status::ready) {
+    return error(408, "Storage cleanup request timed out");
+  }
+  const auto response = future.get();
+  if (!response->accepted) {return error(409, response->message);}
+  return {200, "application/json; charset=utf-8", nlohmann::json({
+    {"success", true}, {"message", response->message}, {"dry_run", request->dry_run},
+    {"bytes", response->bytes}, {"item_count", response->item_count}}).dump() + "\n",
+    {{"Cache-Control", "no-store"}}};
+}
+
 HttpResponse VehicleOpsApi::task(const std::string & body)
 {
   const auto value = trim(body);

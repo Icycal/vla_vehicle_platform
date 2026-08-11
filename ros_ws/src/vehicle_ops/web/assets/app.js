@@ -1,5 +1,5 @@
 const $ = (id) => document.getElementById(id);
-const state = { token: sessionStorage.getItem("vehicleOpsToken") || "", cameraSequence: 0, pipelineCameraSequence: 0, cameraStatus: null, pipelineCameraActive: false, selectedJobId: "", jobs: [], debugRunId: "", debugResult: null, debugImageUrls: {}, pipelineTrace: null, pipelineHistory: [], selectedPipelineStageId: "", selectedPipelineHistoryId: "", inspectorMode: "live", components: [], componentProfiles: [], selectedComponentId: "" };
+const state = { token: sessionStorage.getItem("vehicleOpsToken") || "", cameraSequence: 0, pipelineCameraSequence: 0, cameraStatus: null, pipelineCameraActive: false, selectedJobId: "", jobs: [], debugRunId: "", debugResult: null, debugImageUrls: {}, pipelineTrace: null, pipelineHistory: [], selectedPipelineStageId: "", selectedPipelineHistoryId: "", inspectorMode: "live", components: [], componentProfiles: [], selectedComponentId: "", storage: null, storageItems: [], selectedStorageCategory: "" };
 const text = (id, value) => { $(id).textContent = value ?? "—"; };
 const number = (value, digits = 1) => Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : "--";
 function toast(message, error = false) {
@@ -33,6 +33,7 @@ function setView(name) {
   document.querySelectorAll(".view-panel").forEach((panel) => panel.classList.toggle("active", panel.id === `view-${name}`));
   document.querySelectorAll("[data-view]").forEach((button) => button.classList.toggle("active", button.dataset.view === name));
   history.replaceState(null, "", `#${name}`);
+  if (name === "storage") refreshStorage(true);
 }
 function badge(node, healthy, yes, no) {
   node.className = `pill ${healthy ? "success" : "warning"}`;
@@ -699,12 +700,120 @@ $("copyDebugJson").addEventListener("click", async () => {
 document.querySelectorAll("[data-inspector-mode]").forEach((button) => button.addEventListener("click", () => setInspectorMode(button.dataset.inspectorMode)));
 $("refreshPipelineHistory").addEventListener("click", () => refreshPipelineHistory(true));
 setInspectorMode("live");updateCommand();
-setView(["monitor", "capture", "debug", "tools"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "monitor");
+setView(["monitor", "capture", "debug", "storage", "tools"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "monitor");
 refresh();
 refreshPipeline();
 refreshPipelineHistory();
 refreshComponents();
 refreshJobs();
+
+function formatBytes(value) {
+  const bytes = Number(value || 0);
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let amount = bytes;
+  let index = -1;
+  do { amount /= 1024; index += 1; } while (amount >= 1024 && index < units.length - 1);
+  return `${amount.toFixed(amount >= 10 ? 1 : 2)} ${units[index]}`;
+}
+function storageDate(value) {
+  if (!value?.sec) return "未知时间";
+  return new Date(Number(value.sec) * 1000).toLocaleString("zh-CN", { hour12: false });
+}
+function renderStorageCategories() {
+  const grid = $("storageCategoryGrid");
+  grid.replaceChildren();
+  (state.storage?.categories || []).forEach((category) => {
+    const card = document.createElement("button");
+    card.className = `storage-category-card${state.selectedStorageCategory === category.category_id ? " active" : ""}`;
+    card.innerHTML = `<span><strong>${category.display_name}</strong><small>${category.path}</small></span><span class="storage-category-value"><b>${formatBytes(category.bytes)}</b><small>${category.item_count} 项 · ${category.cleanup_allowed ? "可选择清理" : "只读保护"}</small></span>`;
+    card.addEventListener("click", () => loadStorageItems(category.category_id, category.display_name));
+    grid.appendChild(card);
+  });
+}
+async function refreshStorage(showError = false) {
+  try {
+    const response = await fetch("/api/storage", { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    state.storage = await response.json();
+    const percent = Number(state.storage.used_percent || 0);
+    text("storagePercent", `${percent.toFixed(1)}%`);
+    text("storageTotal", formatBytes(state.storage.total_bytes));
+    text("storageUsed", formatBytes(state.storage.used_bytes));
+    text("storageAvailable", formatBytes(state.storage.available_bytes));
+    text("storageMessage", state.storage.message);
+    $("storageProgress").style.width = `${Math.min(percent, 100)}%`;
+    $("storageRing").style.setProperty("--storage-percent", `${Math.min(percent, 100) * 3.6}deg`);
+    $("storageRing").dataset.level = state.storage.level;
+    badge($("storageApiBadge"), state.storage.level === "normal", `${state.storage.categories.length} 个分类`, state.storage.level === "critical" ? "空间严重不足" : "空间告警");
+    renderStorageCategories();
+  } catch (error) {
+    badge($("storageApiBadge"), false, "存储在线", "存储离线");
+    if (showError) toast(error.message, true);
+  }
+}
+async function loadStorageItems(categoryId, displayName) {
+  try {
+    const result = await jobFetch(`/api/storage/items/${encodeURIComponent(categoryId)}`);
+    state.selectedStorageCategory = categoryId;
+    state.storageItems = result.items || [];
+    text("storageItemsTitle", `${displayName} · ${state.storageItems.length} 项`);
+    renderStorageCategories();
+    renderStorageItems();
+  } catch (error) { toast(error.message, true); }
+}
+function selectedStorageItems() {
+  return [...document.querySelectorAll("[data-storage-item]:checked")].map((input) => input.value);
+}
+function updateStorageSelection() {
+  const selected = new Set(selectedStorageItems());
+  const bytes = state.storageItems.filter((item) => selected.has(item.item_id)).reduce((sum, item) => sum + Number(item.bytes || 0), 0);
+  text("storageSelectionCount", selected.size ? `已选择 ${selected.size} 项` : "未选择项目");
+  text("storageSelectionBytes", formatBytes(bytes));
+  $("cleanupStorage").disabled = selected.size === 0;
+}
+function renderStorageItems() {
+  const list = $("storageItemList");
+  list.replaceChildren();
+  if (!state.storageItems.length) {
+    list.innerHTML = '<div class="job-empty"><strong>当前分类为空</strong><span>没有可展示的数据</span></div>';
+  } else {
+    state.storageItems.forEach((item) => {
+      const row = document.createElement("label");
+      row.className = `storage-item${item.is_protected ? " protected" : ""}`;
+      row.innerHTML = `<input type="checkbox" data-storage-item value="${item.item_id}" ${item.is_protected ? "disabled" : ""}><span><strong>${item.display_name}</strong><small>${item.path} · ${storageDate(item.modified_at)}</small></span><span class="storage-item-size"><b>${formatBytes(item.bytes)}</b><small>${item.message}</small></span>`;
+      row.querySelector("input").addEventListener("change", updateStorageSelection);
+      list.appendChild(row);
+    });
+  }
+  $("selectAllStorage").disabled = !state.storageItems.some((item) => !item.protected);
+  updateStorageSelection();
+}
+async function cleanupSelectedStorage() {
+  const itemIds = selectedStorageItems();
+  if (!itemIds.length) return;
+  const payload = { category_id: state.selectedStorageCategory, item_ids: itemIds, dry_run: true };
+  try {
+    const preview = await jobFetch("/api/storage/cleanup", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+    if (!confirm(`确认清理 ${preview.item_count} 项？
+
+预计释放 ${formatBytes(preview.bytes)}。此操作不可恢复。`)) return;
+    payload.dry_run = false;
+    const result = await jobFetch("/api/storage/cleanup", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+    toast(`清理完成，释放 ${formatBytes(result.bytes)}`);
+    const category = state.storage.categories.find((item) => item.category_id === state.selectedStorageCategory);
+    await refreshStorage();
+    await loadStorageItems(state.selectedStorageCategory, category?.display_name || state.selectedStorageCategory);
+  } catch (error) { toast(error.message, true); }
+}
+$("refreshStorage").addEventListener("click", () => refreshStorage(true));
+$("selectAllStorage").addEventListener("click", () => {
+  document.querySelectorAll("[data-storage-item]:not(:disabled)").forEach((input) => {input.checked = true;});
+  updateStorageSelection();
+});
+$("cleanupStorage").addEventListener("click", cleanupSelectedStorage);
+refreshStorage();
+setInterval(refreshStorage, 10000);
 setInterval(refresh, 1000);
 setInterval(refreshPipeline, 1000);
 setInterval(refreshPipelineHistory, 5000);

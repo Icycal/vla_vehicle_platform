@@ -172,6 +172,9 @@ ssh -L 8088:127.0.0.1:8088 wheeltec@10.101.70.232
 | GET | `/api/pipeline/live` | 否 | 返回最新被动 Pipeline Trace |
 | GET | `/api/pipeline/history` | 否 | 返回最近 30 个 Observation Trace |
 | GET | `/api/components` | 否 | 查询受管组件、健康状态与可用场景 |
+| GET | /api/storage | 否 | 查询磁盘容量和分类占用 |
+| GET | /api/storage/items/<category-id> | 是 | 查询白名单分类明细 |
+| POST | /api/storage/cleanup | 是 | 预览或执行选择性清理 |
 | POST | `/api/components/control` | 是 | 启动、停止或重启单个白名单组件 |
 | POST | `/api/profiles/control` | 是 | 按依赖顺序控制一键场景 |
 | GET | `/api/components/<component-id>/log` | 是 | 获取组件固定日志的有界尾部 |

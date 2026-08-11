@@ -23,6 +23,8 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   msg/ShadowComparison.msg
   msg/ShadowMetrics.msg
   msg/SystemState.msg
+  msg/StorageCategory.msg
+  msg/StorageItem.msg
   msg/TeleopCommand.msg
   srv/ControlComponent.srv
   srv/ControlProfile.srv
@@ -34,6 +36,9 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   srv/RequestSafeStop.srv
   srv/StartEpisode.srv
   srv/StopEpisode.srv
+  srv/GetStorageStatus.srv
+  srv/ListStorageItems.srv
+  srv/CleanupStorage.srv
   action/AcquireControlLease.action
   DEPENDENCIES action_msgs builtin_interfaces geometry_msgs sensor_msgs std_msgs
 )

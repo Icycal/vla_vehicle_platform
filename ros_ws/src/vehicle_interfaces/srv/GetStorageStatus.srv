@@ -1,0 +1,8 @@
+---
+uint64 total_bytes
+uint64 used_bytes
+uint64 available_bytes
+float32 used_percent
+string level
+string message
+vehicle_interfaces/StorageCategory[] categories

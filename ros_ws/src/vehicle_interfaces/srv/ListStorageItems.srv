@@ -1,0 +1,5 @@
+string category_id
+---
+bool accepted
+string message
+vehicle_interfaces/StorageItem[] items

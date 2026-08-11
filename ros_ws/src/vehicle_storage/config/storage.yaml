@@ -1,0 +1,36 @@
+storage_manager:
+  ros__parameters:
+    project_root: /home/wheeltec/vla_vehicle_platform
+    warning_used_percent: 80.0
+    critical_used_percent: 90.0
+    category_ids: [episodes, lerobot_datasets, exports, debug_runs, jobs, component_logs, build_logs, test_artifacts, training_runs, models]
+    categories.episodes.display_name: "Episode 原始数据"
+    categories.episodes.path: datasets/episodes
+    categories.episodes.cleanup_allowed: true
+    categories.lerobot_datasets.display_name: "LeRobot 数据集"
+    categories.lerobot_datasets.path: datasets/lerobot
+    categories.lerobot_datasets.cleanup_allowed: true
+    categories.exports.display_name: "Dataset 导出包"
+    categories.exports.path: datasets/exports
+    categories.exports.cleanup_allowed: true
+    categories.debug_runs.display_name: "VLA 调试记录"
+    categories.debug_runs.path: run/ops/debug
+    categories.debug_runs.cleanup_allowed: true
+    categories.jobs.display_name: "工程任务记录"
+    categories.jobs.path: run/ops/jobs
+    categories.jobs.cleanup_allowed: true
+    categories.component_logs.display_name: "组件运行日志"
+    categories.component_logs.path: run/log/components
+    categories.component_logs.cleanup_allowed: true
+    categories.build_logs.display_name: "ROS 构建日志"
+    categories.build_logs.path: ros_ws/log
+    categories.build_logs.cleanup_allowed: true
+    categories.test_artifacts.display_name: "测试临时数据"
+    categories.test_artifacts.path: run/test
+    categories.test_artifacts.cleanup_allowed: true
+    categories.training_runs.display_name: "训练输出"
+    categories.training_runs.path: run/training
+    categories.training_runs.cleanup_allowed: true
+    categories.models.display_name: "模型与缓存"
+    categories.models.path: run/models
+    categories.models.cleanup_allowed: false
