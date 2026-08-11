@@ -598,12 +598,13 @@ function renderComponents() {
   }
   state.components.forEach((component) => {
     const label = componentLabel(component.state);
+    const dependentCount = managedDependents(component.component_id).length;
     const card = document.createElement("article");
     card.className = "component-card";
     card.innerHTML = `<div class="component-card-head"><h3>${component.display_name}<small>${component.component_id}</small></h3><span class="component-state ${component.state}">${label[0]} · ${label[1]}</span></div>
       <div class="component-meta"><div><small>进程 PID</small><strong>${component.pid || "--"}</strong></div><div><small>运行时间</small><strong>${component.uptime_seconds > 0 ? `${number(component.uptime_seconds, 0)} s` : "--"}</strong></div><div><small>组件分组</small><strong>${component.group_name || "--"}</strong></div></div>
       <p class="component-message">${componentDescription(component)}</p><p class="component-dependencies">依赖：${component.dependencies?.length ? component.dependencies.join(" → ") : "无"}</p>
-      <div class="component-actions"><button class="button primary" data-component-action="start" ${component.can_start ? "" : "disabled"}>启动</button><button class="button secondary" data-component-action="stop" ${component.can_stop ? "" : "disabled"}>停止</button><button class="button secondary" data-component-action="restart" ${component.can_restart ? "" : "disabled"}>重启</button><button class="button ghost" data-component-log>日志</button></div>`;
+      <div class="component-actions"><button class="button primary" data-component-action="start" ${component.can_start ? "" : "disabled"}>启动</button><button class="button secondary" data-component-action="stop" title="${dependentCount ? `将同时停止 ${dependentCount} 个下游组件` : "停止当前组件"}" ${component.can_stop ? "" : "disabled"}>${dependentCount ? "停止链路" : "停止"}</button><button class="button secondary" data-component-action="restart" ${component.can_restart ? "" : "disabled"}>重启</button><button class="button ghost" data-component-log>日志</button></div>`;
     card.querySelectorAll("[data-component-action]").forEach((button) => button.addEventListener("click", () => controlComponent(component.component_id, button.dataset.componentAction)));
     card.querySelector("[data-component-log]").addEventListener("click", () => loadComponentLog(component.component_id, component.display_name));
     grid.appendChild(card);
@@ -623,12 +624,37 @@ async function refreshComponents(showError = false) {
     if (showError) toast(error.message, true);
   }
 }
+function managedDependents(componentId) {
+  const result = [];
+  const visited = new Set();
+  function visit(parentId) {
+    state.components.filter((component) => component.managed && component.dependencies?.includes(parentId)).forEach((component) => {
+      if (visited.has(component.component_id)) return;
+      visited.add(component.component_id);
+      visit(component.component_id);
+      result.push(component);
+    });
+  }
+  visit(componentId);
+  return result;
+}
 async function controlComponent(componentId, action) {
-  if (["stop", "restart"].includes(action) && !confirm(`确认${action === "stop" ? "停止" : "重启"}组件 ${componentId}？`)) return;
+  const component = state.components.find((item) => item.component_id === componentId);
+  const displayName = component?.display_name || componentId;
+  const dependents = action === "stop" ? managedDependents(componentId) : [];
+  if (action === "stop") {
+    const affected = dependents.length ? `\n\n将同时停止：${dependents.map((item) => item.display_name).join("、")}` : "";
+    if (!confirm(`确认停止“${displayName}”？${affected}\n\nVehicle Ops 管理面会继续运行。`)) return;
+  }
+  if (action === "restart" && !confirm(`确认重启“${displayName}”？`)) return;
   $("componentGrid").classList.add("component-action-busy");
   try {
-    const result = await jobFetch("/api/components/control", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ component_id: componentId, action }) });
-    toast(result.message); await refreshComponents();
+    await jobFetch("/api/components/control", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ component_id: componentId, action, force: action === "stop" }) });
+    const actionName = ({ start: "启动", stop: "停止", restart: "重启" })[action] || action;
+    toast(dependents.length ? `${displayName}及 ${dependents.length} 个下游组件已${actionName}` : `${displayName}已${actionName}`);
+    await refreshComponents();
+    setTimeout(refreshComponents, 1200);
+    setTimeout(refreshComponents, 4200);
   } catch (error) { toast(error.message, true); }
   finally { $("componentGrid").classList.remove("component-action-busy"); }
 }

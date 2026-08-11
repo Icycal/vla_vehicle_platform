@@ -131,7 +131,7 @@ public:
           response->accepted = control_component(request->component_id, request->action, request->force, visited);
           refresh_states();
           response->component = state_for(request->component_id);
-          response->message = response->accepted ? "Component operation completed" : "Component operation rejected";
+          response->message = response->accepted ? "组件操作已完成" : "组件操作被拒绝";
         } catch (const std::exception & error) {
           response->accepted = false;
           response->message = error.what();
@@ -156,7 +156,7 @@ public:
           }
           refresh_states();
           response->accepted = true;
-          response->message = "Profile operation completed";
+          response->message = "场景操作已完成";
           for (const auto & id : component_order_) {response->components.push_back(state_for(id));}
         } catch (const std::exception & error) {
           response->accepted = false;
@@ -269,6 +269,15 @@ private:
     state.pid = integer_value(properties, "MainPID");
     state.last_exit_code = static_cast<std::int32_t>(integer_value(properties, "ExecMainStatus"));
     state.managed = active_state == "active" || active_state == "activating" || active_state == "deactivating";
+    bool recently_stopped = false;
+    {
+      std::lock_guard<std::mutex> lock(recent_stop_mutex_);
+      const auto stopped = recently_stopped_.find(definition.id);
+      if (stopped != recently_stopped_.end()) {
+        recently_stopped = std::chrono::steady_clock::now() - stopped->second < 15s;
+        if (!recently_stopped) {recently_stopped_.erase(stopped);}
+      }
+    }
 
     const auto graph_nodes = get_node_names();
     std::set<std::string> normalized_nodes;
@@ -290,6 +299,9 @@ private:
     if (load_state != "loaded") {
       state.state = "unavailable";
       state.message = "systemd unit is not installed";
+    } else if (!state.managed && nodes_present && recently_stopped) {
+      state.state = "stopping";
+      state.message = "systemd stopped; waiting for ROS graph cleanup";
     } else if (!state.managed && nodes_present && !definition.expected_nodes.empty()) {
       state.state = "external";
       state.message = "ROS nodes are running outside the orchestrator";
@@ -348,12 +360,15 @@ private:
         if (!control_component(dependency, "start", false, visited)) {return false;}
       }
     }
-    if (action == "stop" && !force) {
+    if (action == "stop") {
       refresh_states();
-      for (const auto & [dependent_id, definition] : components_) {
+      for (const auto & dependent_id : component_order_) {
+        const auto & definition = components_.at(dependent_id);
         if (std::find(definition.dependencies.begin(), definition.dependencies.end(), id) == definition.dependencies.end()) {continue;}
         const auto dependent = state_for(dependent_id);
-        if (dependent.managed) {throw std::runtime_error("Stop dependent component first: " + dependent_id);}
+        if (!dependent.managed) {continue;}
+        if (!force) {throw std::runtime_error("Stop dependent component first: " + dependent_id);}
+        if (!control_component(dependent_id, "stop", true, visited)) {return false;}
       }
     }
     if (action != "start" && action != "stop" && action != "restart") {
@@ -361,6 +376,11 @@ private:
     }
     const auto result = run_command({"systemctl", "--user", "--no-ask-password", action, found->second.unit});
     if (result.exit_code != 0) {throw std::runtime_error(trim(result.output));}
+    {
+      std::lock_guard<std::mutex> lock(recent_stop_mutex_);
+      if (action == "stop") {recently_stopped_[id] = std::chrono::steady_clock::now();}
+      else {recently_stopped_.erase(id);}
+    }
     std::this_thread::sleep_for(250ms);
     return true;
   }
@@ -372,6 +392,8 @@ private:
   std::unordered_map<std::string, vehicle_interfaces::msg::ComponentState> states_;
   std::mutex state_mutex_;
   std::mutex control_mutex_;
+  std::mutex recent_stop_mutex_;
+  std::unordered_map<std::string, std::chrono::steady_clock::time_point> recently_stopped_;
   rclcpp::Service<vehicle_interfaces::srv::ListComponents>::SharedPtr list_service_;
   rclcpp::Service<vehicle_interfaces::srv::ControlComponent>::SharedPtr component_service_;
   rclcpp::Service<vehicle_interfaces::srv::ControlProfile>::SharedPtr profile_service_;
