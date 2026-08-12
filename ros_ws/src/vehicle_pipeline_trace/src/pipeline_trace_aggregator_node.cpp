@@ -215,12 +215,30 @@ private:
       const bool image_valid = !observation_.message->images.empty() &&
         !observation_.message->images.front().data.empty();
       const bool task_valid = !observation_.message->task.empty();
+      const auto state_valid_count = std::count(
+        observation_.message->state_valid.begin(), observation_.message->state_valid.end(), true);
+      Json blocking_issues = Json::array();
+      if (!schema_valid) {blocking_issues.push_back("schema_version");}
+      if (!image_valid) {blocking_issues.push_back("front_image");}
+      if (!task_valid) {blocking_issues.push_back("task_text");}
+      Json diagnostic_issues = Json::array();
+      if (state_valid_count == 0) {diagnostic_issues.push_back("vehicle_state_unavailable");}
       contract_detail = {{"schema_valid", schema_valid}, {"image_valid", image_valid},
-        {"task_valid", task_valid}, {"state_valid_count", std::count(
-          observation_.message->state_valid.begin(), observation_.message->state_valid.end(), true)}};
-      contract_status = schema_valid && image_valid && task_valid ? Stage::STATUS_READY : Stage::STATUS_REJECTED;
-      contract_message = schema_valid && image_valid && task_valid ?
-        "Observation contract accepted" : "Observation contract is incomplete";
+        {"task_valid", task_valid}, {"state_valid_count", state_valid_count},
+        {"state_total_count", observation_.message->state_valid.size()},
+        {"blocking_issues", blocking_issues}, {"diagnostic_issues", diagnostic_issues}};
+      contract_status = blocking_issues.empty() ? Stage::STATUS_READY : Stage::STATUS_REJECTED;
+      if (blocking_issues.empty()) {
+        contract_message = "Observation contract accepted";
+      } else if (!task_valid && schema_valid && image_valid) {
+        contract_message = "Task text is missing";
+      } else if (!image_valid && schema_valid && task_valid) {
+        contract_message = "Front image is missing";
+      } else if (!schema_valid && image_valid && task_valid) {
+        contract_message = "Observation schema version is invalid";
+      } else {
+        contract_message = "Observation contract has multiple blocking issues";
+      }
     }
     trace.stages.push_back(stage(
       "contract_validation", "Contract Validation", "vehicle.observation.v1",

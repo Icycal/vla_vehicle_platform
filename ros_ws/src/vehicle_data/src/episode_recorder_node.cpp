@@ -134,7 +134,7 @@ public:
         record_message(*message, "/cmd_vel", now());
       });
     task_subscription_ = create_subscription<std_msgs::msg::String>(
-      "/vla/task", 10,
+      "/vla/task", rclcpp::QoS(1).reliable().transient_local(),
       [this](std_msgs::msg::String::SharedPtr message) {
         record_message(*message, "/vla/task", now());
       });

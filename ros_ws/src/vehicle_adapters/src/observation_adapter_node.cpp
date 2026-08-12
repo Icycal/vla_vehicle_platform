@@ -66,7 +66,7 @@ public:
         voltage_valid_ = true;
       });
     task_subscription_ = create_subscription<std_msgs::msg::String>(
-      "/vla/task", rclcpp::QoS(10).reliable(),
+      "/vla/task", rclcpp::QoS(1).reliable().transient_local(),
       [this](std_msgs::msg::String::SharedPtr message) {task_ = message->data;});
 
     const auto period = std::chrono::duration<double>(

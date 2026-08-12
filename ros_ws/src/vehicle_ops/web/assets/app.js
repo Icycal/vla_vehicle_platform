@@ -446,11 +446,117 @@ function pipelineStageName(stage) {
 function pipelineStatusName(status) {
   return pipelineStatusNames[status] || { zh: "未知状态", en: status || "UNKNOWN" };
 }
+function contractValidationSummary(stage) {
+  const detail = stage?.detail || {};
+  const failures = [];
+  if (detail.schema_valid === false) failures.push("Schema 版本不匹配");
+  if (detail.image_valid === false) failures.push("前视图像缺失或为空");
+  if (detail.task_valid === false) failures.push("任务文本为空");
+  if (!failures.length) return "数据契约校验通过，Observation 可以交给 Policy Provider。";
+  const validParts = [];
+  if (detail.schema_valid === true) validParts.push("Schema");
+  if (detail.image_valid === true) validParts.push("图像");
+  const validText = validParts.length ? "；" + validParts.join("、") + "已通过" : "";
+  return "校验未通过：" + failures.join("、") + validText + "。";
+}
+function contractCheckRow(label, status, detail, action = "") {
+  const row = document.createElement("div");
+  row.className = "contract-check " + status;
+  const icon = document.createElement("i");
+  icon.textContent = status === "pass" ? "✓" : status === "warn" ? "!" : "×";
+  const copy = document.createElement("span");
+  const title = document.createElement("strong");
+  const message = document.createElement("small");
+  title.textContent = label;
+  message.textContent = detail;
+  copy.append(title, message);
+  row.append(icon, copy);
+  if (action) {
+    const hint = document.createElement("em");
+    hint.textContent = action;
+    row.appendChild(hint);
+  }
+  return row;
+}
+function renderContractDiagnosis(stage) {
+  const panel = $("contractDiagnosis");
+  if (stage?.stage_id !== "contract_validation") {
+    panel.hidden = true;
+    panel.replaceChildren();
+    return;
+  }
+  const detail = stage.detail || {};
+  panel.hidden = false;
+  panel.replaceChildren();
+  const heading = document.createElement("div");
+  heading.className = "contract-diagnosis-heading";
+  const headingTitle = document.createElement("strong");
+  const headingText = document.createElement("span");
+  headingTitle.textContent = "契约检查明细";
+  headingText.textContent = "阻断项必须修复；状态字段是诊断信息，由具体 Provider 决定是否必需。";
+  heading.append(headingTitle, headingText);
+  const checks = document.createElement("div");
+  checks.className = "contract-check-list";
+  checks.append(
+    contractCheckRow("Schema 版本", detail.schema_valid ? "pass" : "fail",
+      detail.schema_valid ? "vehicle.observation.v1，版本正确" : "期望 vehicle.observation.v1，请检查 Observation Adapter"),
+    contractCheckRow("前视图像", detail.image_valid ? "pass" : "fail",
+      detail.image_valid ? "压缩图像存在且包含有效字节" : "未收到有效图像，请检查相机和 Observation 链路"),
+    contractCheckRow("任务文本", detail.task_valid ? "pass" : "fail",
+      detail.task_valid ? "Observation.task 已设置" : "当前任务为空，模型不知道需要完成什么任务",
+      detail.task_valid ? "" : "阻断推理"));
+  const validCount = Number(detail.state_valid_count || 0);
+  const totalCount = Number(detail.state_total_count || 0);
+  const stateStatus = totalCount > 0 && validCount === totalCount ? "pass" : "warn";
+  checks.append(contractCheckRow("车辆状态", stateStatus,
+    validCount + " / " + (totalCount || "--") + " 个状态字段有效",
+    stateStatus === "warn" ? "非通用阻断项" : ""));
+  panel.append(heading, checks);
+  if (detail.task_valid === false) {
+    const repair = document.createElement("form");
+    repair.className = "contract-repair";
+    const label = document.createElement("label");
+    const labelText = document.createElement("span");
+    const input = document.createElement("input");
+    const button = document.createElement("button");
+    labelText.textContent = "设置实时任务";
+    input.id = "contractTaskInput";
+    input.maxLength = 500;
+    input.placeholder = "例如：向前行驶并避开障碍物";
+    button.className = "button primary";
+    button.type = "submit";
+    button.textContent = "发布任务并重新校验";
+    input.value = $("debugTask")?.value.trim() || $("taskText")?.value.trim() || "move forward and avoid obstacles";
+    label.append(labelText, input);
+    repair.append(label, button);
+    repair.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const value = input.value.trim();
+      if (!value) { toast("请输入任务文本", true); input.focus(); return; }
+      button.disabled = true;
+      button.textContent = "正在发布…";
+      try {
+        const result = await post("/api/task", value);
+        if ($("taskText")) $("taskText").value = value;
+        if ($("debugTask")) $("debugTask").value = value;
+        toast(result.message || "任务已发布，正在等待新 Observation");
+        setTimeout(() => refreshPipeline(true), 500);
+      } catch (error) {
+        toast(error.message, true);
+        button.disabled = false;
+        button.textContent = "发布任务并重新校验";
+      }
+    });
+    panel.appendChild(repair);
+  }
+}
 function pipelineStageDescription(stage) {
   const base = pipelineStageDescriptions[stage?.stage_id] || "正在读取当前阶段状态。";
-  if (["FAILED", "REJECTED", "STALE"].includes(stage?.status) && stage?.message) return `${base} 当前异常：${stage.message}`;
+  if (stage?.stage_id === "contract_validation") return contractValidationSummary(stage);
+  if (["FAILED", "REJECTED", "STALE"].includes(stage?.status) && stage?.message) return base + " 当前异常：" + stage.message;
   return base;
-}function setInspectorMode(mode) {
+}
+function setInspectorMode(mode) {
   state.inspectorMode = mode;
   document.querySelectorAll("[data-inspector-mode]").forEach((button) => {
     const active = button.dataset.inspectorMode === mode;
@@ -483,6 +589,7 @@ function renderPipelineStageDetail(stage) {
   chineseMessage.textContent = pipelineStageDescription(stage);
   originalMessage.textContent = stage.message || "No stage message";
   messageBox.replaceChildren(chineseMessage, originalMessage);
+  renderContractDiagnosis(stage);
   $("pipelineStageStatus").className = `job-state pipeline-${pipelineStatusClass(stage.status)}`;
   $("pipelineStageStatus").textContent = `${statusName.zh} · ${statusName.en}`;
   $("pipelineStageDetail").textContent = JSON.stringify(stage.detail || {}, null, 2);

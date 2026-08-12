@@ -477,7 +477,8 @@ VehicleOpsApi::VehicleOpsApi() : Node("vehicle_ops_api")
       camera_wall_time_ = std::chrono::system_clock::now();
       ++camera_sequence_;
     });
-  task_pub_ = create_publisher<std_msgs::msg::String>("/vla/task", 10);
+  task_pub_ = create_publisher<std_msgs::msg::String>(
+    "/vla/task", rclcpp::QoS(1).reliable().transient_local());
   start_client_ = create_client<vehicle_interfaces::srv::StartEpisode>("/vehicle/start_episode");
   stop_client_ = create_client<vehicle_interfaces::srv::StopEpisode>("/vehicle/stop_episode");
   safe_client_ = create_client<vehicle_interfaces::srv::RequestSafeStop>("/vehicle/request_safe_stop");
