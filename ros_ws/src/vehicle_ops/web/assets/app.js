@@ -643,6 +643,57 @@ function renderPipelineTrace(trace) {
     label: "pipelineCameraLiveLabel", time: "pipelineCameraFrameTime", sequence: "pipelineCameraFrameSequence"
   }, "pipelineCameraSequence", state.pipelineCameraActive);
 }
+function activeDebugStatusName(status) {
+  return ({RUNNING:"运行中", PAUSED:"已暂停", STOPPED:"已停止", TIMED_OUT:"已超时", FAILED:"失败", SUCCEEDED:"任务成功", IDLE:"未启动"})[status] || status || "未启动";
+}
+function renderActiveDebug(session) {
+  state.activeDebug = session;
+  const status = session?.status || "IDLE";
+  const running = status === "RUNNING";
+  const paused = status === "PAUSED";
+  const terminal = ["STOPPED", "TIMED_OUT", "FAILED", "SUCCEEDED"].includes(status);
+  const badge = $("activeDebugBadge");
+  if (!badge) return;
+  badge.className = `pill ${running ? "success" : terminal ? "warning" : "neutral"}`;
+  badge.innerHTML = `<i></i>${activeDebugStatusName(status)} · ${status}`;
+  text("activeDebugStatus", activeDebugStatusName(status));
+  text("activeDebugElapsed", `${number(session?.elapsed_seconds || 0, 1)} s`);
+  text("activeDebugCount", session?.steps || 0);
+  text("activeDebugObservation", session?.last_observation_id || "--");
+  text("activeDebugReason", session?.stop_reason || "--");
+  $("activeDebugStart").disabled = running || paused;
+  $("activeDebugPause").disabled = !running;
+  $("activeDebugResume").disabled = !paused;
+  $("activeDebugStop").disabled = !(running || paused);
+}
+async function refreshActiveDebug(showError = false) {
+  try {
+    const response = await fetch("/api/active-debug/session", { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    renderActiveDebug(await response.json());
+  } catch (error) { if (showError) toast(error.message, true); }
+}
+async function activeDebugAction(action) {
+  try {
+    const result = await post(`/api/active-debug/session/${action}`);
+    toast(result.message);
+    await refreshActiveDebug(true);
+  } catch (error) { toast(error.message, true); }
+}
+$("activeDebugStart")?.addEventListener("click", async () => {
+  try {
+    const task = $("activeDebugTask").value.trim();
+    if (!task) throw new Error("请先输入任务描述");
+    const result = await post("/api/active-debug/sessions", JSON.stringify({
+      task, mode: "shadow", hz: Number($("activeDebugHz").value),
+      max_duration_seconds: Number($("activeDebugDuration").value), max_steps: Number($("activeDebugSteps").value)
+    }));
+    toast(result.message); await refreshActiveDebug(true);
+  } catch (error) { toast(error.message, true); }
+});
+$("activeDebugPause")?.addEventListener("click", () => activeDebugAction("pause"));
+$("activeDebugResume")?.addEventListener("click", () => activeDebugAction("resume"));
+$("activeDebugStop")?.addEventListener("click", () => activeDebugAction("stop"));
 async function refreshPipeline(showError = false) {
   try {
     const response = await fetch("/api/pipeline/live", { cache: "no-store" });
@@ -1167,6 +1218,7 @@ refreshStorage();
 setInterval(refreshStorage, 10000);
 setInterval(refresh, 1000);
 setInterval(refreshPipeline, 1000);
+setInterval(refreshActiveDebug, 1000);
 setInterval(refreshPipelineHistory, 5000);
 setInterval(refreshComponents, 2000);
 setInterval(() => refreshJobs(), 2000);

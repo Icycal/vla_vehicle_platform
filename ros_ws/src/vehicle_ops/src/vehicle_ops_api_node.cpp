@@ -362,6 +362,9 @@ private:
   HttpResponse camera();
   HttpResponse pipeline_live();
   HttpResponse pipeline_history();
+  HttpResponse active_debug_create(const std::string & body);
+  HttpResponse active_debug_get();
+  HttpResponse active_debug_control(const std::string & action);
   HttpResponse components_list();
   HttpResponse component_control(const std::string & body);
   HttpResponse profile_control(const std::string & body);
@@ -383,6 +386,7 @@ private:
   HttpResponse debug_run(const std::string & body);
   HttpResponse debug_image(const std::string & run_id, const std::string & image_name);
   std::string status_json();
+  void active_debug_tick();
   static HttpResponse success(const std::string & message, const std::string & extra = "");
   static HttpResponse error(int status, const std::string & message);
   std::string bind_, token_, web_root_, project_root_, jobs_root_;
@@ -406,6 +410,22 @@ private:
   std::chrono::steady_clock::time_point camera_time_{};
   std::chrono::system_clock::time_point camera_wall_time_{};
   std::uint64_t camera_sequence_{0};
+  struct ActiveDebugSession {
+    std::string id;
+    std::string task;
+    std::string status{"IDLE"};
+    std::string stop_reason;
+    std::string last_observation_id;
+    std::string last_trace_id;
+    std::chrono::steady_clock::time_point started{};
+    std::chrono::steady_clock::time_point last_step{};
+    int steps{0};
+    int max_steps{100};
+    double max_duration_seconds{60.0};
+    double frequency_hz{1.0};
+    bool shadow_only{true};
+  } active_debug_;
+  rclcpp::TimerBase::SharedPtr active_debug_timer_;
   rclcpp::Subscription<vehicle_interfaces::msg::SystemState>::SharedPtr system_sub_;
   rclcpp::Subscription<vehicle_interfaces::msg::ObservationStatus>::SharedPtr observation_sub_;
   rclcpp::Subscription<vehicle_interfaces::msg::EpisodeState>::SharedPtr episode_sub_;
@@ -608,6 +628,15 @@ HttpResponse VehicleOpsApi::route(const HttpRequest & request)
   if (request.method == "GET" && path == "/api/camera/front.jpg") {return camera();}
   if (request.method == "GET" && path == "/api/pipeline/live") {return pipeline_live();}
   if (request.method == "GET" && path == "/api/pipeline/history") {return pipeline_history();}
+  if (request.method == "GET" && path == "/api/active-debug/session") {return active_debug_get();}
+  if (request.method == "POST" && path == "/api/active-debug/sessions") {
+    const auto denied = authorize(request); if (denied) {return *denied;}
+    return active_debug_create(request.body);
+  }
+  if (request.method == "POST" && path.rfind("/api/active-debug/session/", 0) == 0) {
+    const auto denied = authorize(request); if (denied) {return *denied;}
+    return active_debug_control(path.substr(26));
+  }
   if (request.method == "GET" && path == "/api/components") {return components_list();}
   if (request.method == "GET" && path == "/api/storage") {return storage_status();}
   if (request.method == "GET" && path.rfind("/api/storage/items/", 0) == 0) {
@@ -719,6 +748,89 @@ HttpResponse VehicleOpsApi::pipeline_history()
   for (const auto & trace : pipeline_history_) {values.push_back(pipeline_trace_json(trace));}
   return {200, "application/json; charset=utf-8", nlohmann::json({{"traces", values}}).dump() + "\n",
     {{"Cache-Control", "no-store"}}};
+}HttpResponse VehicleOpsApi::active_debug_create(const std::string & body)
+{
+  nlohmann::json input;
+  try {input = nlohmann::json::parse(body);}
+  catch (const nlohmann::json::exception &) {return error(400, "Request body must be valid JSON");}
+  const auto task_value = input.value("task", "");
+  if (task_value.empty()) {return error(400, "Active debug task is required");}
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (active_debug_.status == "RUNNING" || active_debug_.status == "PAUSED") {
+    return error(409, "An active debug session is already running");
+  }
+  const auto now = std::chrono::steady_clock::now();
+  active_debug_ = {};
+  active_debug_.id = "active-debug-" + std::to_string(
+    std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count());
+  active_debug_.task = task_value;
+  active_debug_.status = "RUNNING";
+  active_debug_.started = now;
+  active_debug_.max_steps = std::clamp(input.value("max_steps", 100), 1, 10000);
+  active_debug_.max_duration_seconds = std::clamp(input.value("max_duration_seconds", 60.0), 1.0, 3600.0);
+  active_debug_.frequency_hz = std::clamp(input.value("hz", 1.0), 0.1, 5.0);
+  active_debug_.shadow_only = input.value("mode", "shadow") != "controlled_real";
+  std_msgs::msg::String message; message.data = task_value; task_pub_->publish(message);
+  return {202, "application/json; charset=utf-8", nlohmann::json({
+    {"success", true}, {"message", "Active debug session started in Shadow mode"},
+    {"session_id", active_debug_.id}, {"status", active_debug_.status}}).dump() + "\n", {}};
+}
+HttpResponse VehicleOpsApi::active_debug_get()
+{
+  std::lock_guard<std::mutex> lock(mutex_);
+  const auto elapsed = active_debug_.started.time_since_epoch().count() == 0 ? 0.0 :
+    std::chrono::duration<double>(std::chrono::steady_clock::now() - active_debug_.started).count();
+  return {200, "application/json; charset=utf-8", nlohmann::json({
+    {"session_id", active_debug_.id}, {"task", active_debug_.task}, {"status", active_debug_.status},
+    {"stop_reason", active_debug_.stop_reason}, {"steps", active_debug_.steps},
+    {"elapsed_seconds", elapsed}, {"max_steps", active_debug_.max_steps},
+    {"max_duration_seconds", active_debug_.max_duration_seconds}, {"frequency_hz", active_debug_.frequency_hz},
+    {"shadow_only", active_debug_.shadow_only}, {"last_observation_id", active_debug_.last_observation_id},
+    {"last_trace_id", active_debug_.last_trace_id}}).dump() + "\n", {{"Cache-Control", "no-store"}}};
+}
+HttpResponse VehicleOpsApi::active_debug_control(const std::string & action)
+{
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (active_debug_.status == "IDLE") {return error(404, "No active debug session");}
+  if (action == "pause" && active_debug_.status == "RUNNING") active_debug_.status = "PAUSED";
+  else if (action == "resume" && active_debug_.status == "PAUSED") active_debug_.status = "RUNNING";
+  else if (action == "stop" && (active_debug_.status == "RUNNING" || active_debug_.status == "PAUSED")) {
+    active_debug_.status = "STOPPED"; active_debug_.stop_reason = "Stopped by operator";
+  } else {return error(409, "Invalid active debug operation");}
+  return success("Active debug session updated");
+}
+void VehicleOpsApi::active_debug_tick()
+{
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (active_debug_.status != "RUNNING" || !pipeline_trace_) return;
+  const auto now = std::chrono::steady_clock::now();
+  const auto elapsed = std::chrono::duration<double>(now - active_debug_.started).count();
+  if (elapsed >= active_debug_.max_duration_seconds) {
+    active_debug_.status = "TIMED_OUT"; active_debug_.stop_reason = "Maximum duration reached"; return;
+  }
+  if (active_debug_.steps >= active_debug_.max_steps) {
+    active_debug_.status = "STOPPED"; active_debug_.stop_reason = "Maximum steps reached"; return;
+  }
+  const auto & trace = *pipeline_trace_;
+  const auto step_period = std::chrono::duration<double>(1.0 / active_debug_.frequency_hz);
+  if (active_debug_.last_step.time_since_epoch().count() != 0 &&
+    std::chrono::duration<double>(now - active_debug_.last_step).count() < step_period.count()) return;
+  if (trace.observation_id.empty() || trace.observation_id == active_debug_.last_observation_id) return;
+  active_debug_.last_observation_id = trace.observation_id;
+  active_debug_.last_trace_id = trace.trace_id;
+  active_debug_.last_step = now;
+  ++active_debug_.steps;
+  for (const auto & stage : trace.stages) {
+    const auto message = lowercase(stage.message + " " + stage.output_summary);
+    if (message.find("success") != std::string::npos ||
+      message.find("completed") != std::string::npos || message.find("terminate") != std::string::npos) {
+      active_debug_.status = "SUCCEEDED"; active_debug_.stop_reason = stage.label + ": task completion reported"; return;
+    }
+    if (stage.status == vehicle_interfaces::msg::PipelineStage::STATUS_FAILED ||
+      stage.status == vehicle_interfaces::msg::PipelineStage::STATUS_REJECTED) {
+      active_debug_.status = "FAILED"; active_debug_.stop_reason = stage.label + ": " + stage.message; return;
+    }
+  }
 }HttpResponse VehicleOpsApi::components_list()
 {
   if (!components_client_->wait_for_service(250ms)) {return error(503, "Operation Orchestrator is unavailable");}

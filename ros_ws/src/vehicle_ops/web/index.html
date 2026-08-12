@@ -14,6 +14,12 @@
     </div>
   </div>
 
+  <article class="panel active-debug-panel">
+    <div class="section-heading"><div><p class="eyebrow">任务级闭环调试 · ACTIVE TASK DEBUG</p><h2>主动调试链路</h2><p class="component-intro">输入一个任务后，自动读取实时相机与 Observation，循环执行 VLA Shadow 推理；不会发布真实车辆控制。</p></div><span id="activeDebugBadge" class="pill neutral"><i></i>未启动</span></div>
+    <div class="active-debug-form"><label>任务描述<textarea id="activeDebugTask" rows="2" placeholder="例如：沿通道前进，遇到障碍物停车"></textarea></label><label>最大时长（秒）<input id="activeDebugDuration" type="number" min="1" max="3600" value="60"></label><label>最大步数<input id="activeDebugSteps" type="number" min="1" max="10000" value="100"></label><label>运行频率（Hz）<input id="activeDebugHz" type="number" min="0.1" max="5" step="0.1" value="1"></label></div>
+    <div class="button-row"><button class="button primary" id="activeDebugStart">开始主动调试</button><button class="button secondary" id="activeDebugPause" disabled>暂停</button><button class="button secondary" id="activeDebugResume" disabled>恢复</button><button class="button danger" id="activeDebugStop" disabled>停止</button></div>
+    <div class="active-debug-stats"><div><small>当前状态</small><strong id="activeDebugStatus">未启动</strong></div><div><small>已运行</small><strong id="activeDebugElapsed">0.0 s</strong></div><div><small>已处理帧</small><strong id="activeDebugCount">0</strong></div><div><small>最近 Observation</small><strong id="activeDebugObservation">--</strong></div><div><small>停止原因</small><strong id="activeDebugReason">--</strong></div></div>
+  </article>
   <div class="inspector-panel active" data-inspector-panel="live">
     <article class="panel pipeline-overview">
       <div class="section-heading"><div><p class="eyebrow">被动实时追踪 · PASSIVE LIVE TRACE</p><h2>实时链路状态</h2></div><span id="pipelineLiveState" class="pill neutral"><i></i>等待追踪 · WAITING</span></div>
