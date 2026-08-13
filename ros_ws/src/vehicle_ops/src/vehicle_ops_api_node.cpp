@@ -499,6 +499,7 @@ VehicleOpsApi::VehicleOpsApi() : Node("vehicle_ops_api")
     });
   task_pub_ = create_publisher<std_msgs::msg::String>(
     "/vla/task", rclcpp::QoS(1).reliable().transient_local());
+  active_debug_timer_ = create_wall_timer(500ms, std::bind(&VehicleOpsApi::active_debug_tick, this));
   start_client_ = create_client<vehicle_interfaces::srv::StartEpisode>("/vehicle/start_episode");
   stop_client_ = create_client<vehicle_interfaces::srv::StopEpisode>("/vehicle/stop_episode");
   safe_client_ = create_client<vehicle_interfaces::srv::RequestSafeStop>("/vehicle/request_safe_stop");
