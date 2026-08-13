@@ -176,7 +176,11 @@ std::string JobManager::create(const std::string & request_body)
   job->log_path = job->directory / "job.log";
 
   const auto scripts = project_root_ / "scripts";
-  if (type == "dataset.inspect") {
+  if (type == "dataset.export_episode") {
+    job->command = {(scripts / "export_episode.sh").string(),
+      resolve_input(required_string(parameters, "episode")).string(),
+      resolve_output(required_string(parameters, "output")).string()};
+  } else if (type == "dataset.inspect") {
     job->command = {(scripts / "inspect_dataset.sh").string(),
       resolve_input(required_string(parameters, "dataset")).string(),
       resolve_output(required_string(parameters, "output")).string()};

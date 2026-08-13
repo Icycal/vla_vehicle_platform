@@ -1,4 +1,4 @@
-<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#08131f"><title>Vehicle Ops Console</title><link rel="icon" href="/favicon.svg"><link rel="stylesheet" href="/assets/app.css"></head><body>
+﻿<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#08131f"><title>Vehicle Ops Console</title><link rel="icon" href="/favicon.svg"><link rel="stylesheet" href="/assets/app.css"></head><body>
 <header class="topbar"><a class="brand" href="#"><span class="brand-mark">V</span><span><strong>Vehicle Ops</strong><small>ACKERMANN · SHADOW LAB</small></span></a><nav class="main-nav" aria-label="主导航"><button class="nav-item active" data-view="monitor">实时监控</button><button class="nav-item" data-view="capture">数据采集</button><button class="nav-item" data-view="debug">VLA 调试</button><button class="nav-item" data-view="storage">存储管理</button><button class="nav-item" data-view="tools">工程工具</button></nav><div class="top-actions"><span id="connectionBadge" class="pill warning"><i></i>连接中</span><button class="icon-button" id="tokenButton" title="操作令牌">⌁</button></div></header>
 <main><section class="overview"><div class="overview-copy"><p class="eyebrow">车辆状态 · VEHICLE STATUS</p><h1>运行概览</h1><p>相机、Observation、Policy、Episode 与安全链路</p></div><div class="mode-card"><div class="orb" id="modeOrb"><span></span></div><div><small>当前控制模式<span>Control Mode</span></small><strong id="modeName">等待状态</strong><p id="systemMessage">正在连接 Vehicle Ops API…</p></div></div></section>
 <section class="metrics-grid"><article class="metric"><span class="metric-icon cyan">◉</span><div><small>Observation</small><strong id="observationState">OFFLINE</strong><p id="observationMeta">尚未收到状态</p></div></article><article class="metric"><span class="metric-icon violet">✦</span><div><small>Policy Runtime</small><strong id="policyState">OFFLINE</strong><p id="policyMeta">等待 Provider</p></div></article><article class="metric"><span class="metric-icon lime">●</span><div><small>Episode</small><strong id="episodeState">IDLE</strong><p id="episodeMeta">未开始记录</p></div></article><article class="metric resource-metric"><span class="metric-icon resource">CPU</span><div><small>处理器</small><strong id="cpuState">--</strong><p id="cpuMeta">正在读取负载</p></div></article><article class="metric resource-metric"><span class="metric-icon resource">RAM</span><div><small>统一内存</small><strong id="memoryState">--</strong><p id="hostMeta">系统指标载入中</p></div></article><article class="metric resource-metric"><span class="metric-icon resource">GPU</span><div><small>图形处理器</small><strong id="gpuState">--</strong><p id="gpuMeta">正在读取 GPU</p></div></article></section>
@@ -12,15 +12,7 @@
       <button class="inspector-mode" data-inspector-mode="history" role="tab"><span>追踪历史</span><small>Trace History</small></button>
       <button class="inspector-mode" data-inspector-mode="components" role="tab"><span>组件控制</span><small>Components</small></button>
     </div>
-  </div>
-
-  <article class="panel active-debug-panel">
-    <div class="section-heading"><div><p class="eyebrow">任务级闭环调试 · ACTIVE TASK DEBUG</p><h2>主动调试链路</h2><p class="component-intro">输入一个任务后，自动读取实时相机与 Observation，循环执行 VLA Shadow 推理；不会发布真实车辆控制。</p></div><span id="activeDebugBadge" class="pill neutral"><i></i>未启动</span></div>
-    <div class="active-debug-form"><label>任务描述<textarea id="activeDebugTask" rows="2" placeholder="例如：沿通道前进，遇到障碍物停车"></textarea></label><label>最大时长（秒）<input id="activeDebugDuration" type="number" min="1" max="3600" value="60"></label><label>最大步数<input id="activeDebugSteps" type="number" min="1" max="10000" value="100"></label><label>运行频率（Hz）<input id="activeDebugHz" type="number" min="0.1" max="5" step="0.1" value="1"></label></div>
-    <div class="button-row"><button class="button primary" id="activeDebugStart">开始主动调试</button><button class="button secondary" id="activeDebugPause" disabled>暂停</button><button class="button secondary" id="activeDebugResume" disabled>恢复</button><button class="button danger" id="activeDebugStop" disabled>停止</button></div>
-    <div class="active-debug-stats"><div><small>当前状态</small><strong id="activeDebugStatus">未启动</strong></div><div><small>已运行</small><strong id="activeDebugElapsed">0.0 s</strong></div><div><small>已处理帧</small><strong id="activeDebugCount">0</strong></div><div><small>最近 Observation</small><strong id="activeDebugObservation">--</strong></div><div><small>停止原因</small><strong id="activeDebugReason">--</strong></div></div>
-  </article>
-  <div class="inspector-panel active" data-inspector-panel="live">
+  </div><div class="inspector-panel active" data-inspector-panel="live">
     <article class="panel pipeline-overview">
       <div class="section-heading"><div><p class="eyebrow">被动实时追踪 · PASSIVE LIVE TRACE</p><h2>实时链路状态</h2></div><span id="pipelineLiveState" class="pill neutral"><i></i>等待追踪 · WAITING</span></div>
       <div class="pipeline-meta-strip"><div><small>链路追踪<span>Trace</span></small><strong id="pipelineTraceId">--</strong></div><div><small>观测数据<span>Observation</span></small><strong id="pipelineObservationId">--</strong></div><div><small>模型服务<span>Provider / Model</span></small><strong id="pipelineProvider">--</strong></div><div><small>更新时间<span>Updated</span></small><strong id="pipelineReceivedAge">--</strong></div></div>
@@ -141,7 +133,16 @@
   </div>
 </section>
 <section class="view-panel" id="view-tools">
-  <div class="job-center-grid">
+  <article class="panel dataset-center">
+    <div class="section-heading"><div><p class="eyebrow">DATA ASSET CENTER</p><h2>Episode 与数据集管理</h2><p class="component-intro">原始记录保持模型无关；导出后可检查并转换为 LeRobot，供 SmolVLA 或其他 LeRobot 策略使用。</p></div><div class="dataset-actions"><span class="pill neutral" id="datasetApiBadge"><i></i>读取中</span><button class="button ghost compact-button" id="refreshDatasets">刷新</button></div></div>
+    <div class="dataset-flow"><span>原始 Episode</span><b>→</b><span>vehicle.dataset.v1</span><b>→</b><span>LeRobot Dataset</span><small>Export → Inspect → Convert</small></div>
+    <div class="dataset-columns">
+      <section><div class="dataset-column-heading"><strong>原始 Episode</strong><small id="episodeDatasetCount">0 项</small></div><div id="episodeDatasetList" class="dataset-list"><div class="job-empty"><strong>正在扫描</strong><span>等待数据目录接口</span></div></div></section>
+      <section><div class="dataset-column-heading"><strong>中间数据</strong><small id="exportDatasetCount">0 项</small></div><div id="exportDatasetList" class="dataset-list"><div class="job-empty"><strong>尚无导出数据</strong><span>可从左侧 Episode 一键导出</span></div></div></section>
+      <section><div class="dataset-column-heading"><strong>LeRobot 数据集</strong><small id="lerobotDatasetCount">0 项</small></div><div id="lerobotDatasetList" class="dataset-list"><div class="job-empty"><strong>尚无 LeRobot 数据集</strong><span>可从中间数据一键转换</span></div></div></section>
+    </div>
+    <div class="dataset-detail" id="datasetDetail"><span>选择一个数据资产查看详情</span><small>DETAIL / 文件统计与训练兼容性</small></div>
+  </article>  <div class="job-center-grid">
     <article class="panel job-launcher">
       <div class="section-heading"><div><p class="eyebrow">CONTROLLED JOBS</p><h2>受控任务中心</h2></div><span class="pill neutral" id="jobApiBadge"><i></i>需要令牌</span></div>
       <p class="job-intro">仅执行后端白名单任务。参数会经过路径沙箱校验，任务不会访问底盘控制链路。</p>

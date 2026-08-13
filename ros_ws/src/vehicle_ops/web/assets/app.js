@@ -1,4 +1,4 @@
-const $ = (id) => document.getElementById(id);
+﻿const $ = (id) => document.getElementById(id);
 const state = { token: sessionStorage.getItem("vehicleOpsToken") || "", cameraSequence: 0, pipelineCameraSequence: 0, cameraStatus: null, pipelineCameraActive: false, selectedJobId: "", jobs: [], debugRunId: "", debugResult: null, debugImageUrls: {}, pipelineTrace: null, pipelineHistory: [], selectedPipelineStageId: "", selectedPipelineHistoryId: "", inspectorMode: "live", components: [], componentProfiles: [], selectedComponentId: "", storage: null, storageItems: [], selectedStorageCategory: "", systemMode: "", debugInputSource: "camera", debugUpload: null, observationWidth: 640, observationHeight: 480 };
 const text = (id, value) => { $(id).textContent = value ?? "—"; };
 const number = (value, digits = 1) => Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : "--";
@@ -96,6 +96,7 @@ function setView(name) {
   document.querySelectorAll("[data-view]").forEach((button) => button.classList.toggle("active", button.dataset.view === name));
   history.replaceState(null, "", `#${name}`);
   if (name === "storage") refreshStorage(true);
+  if (name === "tools") refreshDatasets(true);
 }
 function badge(node, healthy, yes, no) {
   node.className = `pill ${healthy ? "success" : "warning"}`;
@@ -258,6 +259,7 @@ $("safeStop").addEventListener("click", async () => {
 });
 document.querySelectorAll("[data-view]").forEach((button) => button.addEventListener("click", () => setView(button.dataset.view)));
 document.querySelectorAll("[data-open-view]").forEach((button) => button.addEventListener("click", () => setView(button.dataset.openView)));
+$("refreshDatasets")?.addEventListener("click", () => refreshDatasets(true));
 $("tokenButton").addEventListener("click", openToken);
 $("tokenClose").addEventListener("click", closeToken);
 $("panelBackdrop").addEventListener("click", closeToken);
@@ -325,7 +327,52 @@ function renderJobList() {
     list.appendChild(button);
   });
 }
-async function refreshJobs(showError = false) {
+function formatBytes(value) {
+  const bytes = Number(value || 0);
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+  return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
+}
+function datasetCard(item, category) {
+  const card = document.createElement("div");
+  card.className = `dataset-item${item.protected ? " protected" : ""}`;
+  const state = category === "lerobot" ? (item.training_ready ? "训练可用" : "需校验") : item.format;
+  card.innerHTML = `<div><strong title="${item.name}">${item.name}</strong><small>${state} · ${formatBytes(item.bytes)} · ${item.frame_count || 0} 帧</small></div><div class="dataset-item-actions"><button class="button ghost compact-button" data-dataset-detail>详情</button>${category === "episodes" && !item.protected ? `<button class="button secondary compact-button" data-dataset-export>导出</button>` : ""}${category === "exports" ? `<button class="button secondary compact-button" data-dataset-convert>转 LeRobot</button>` : ""}</div>`;
+  card.querySelector("[data-dataset-detail]").addEventListener("click", () => showDatasetDetail(item.path));
+  card.querySelector("[data-dataset-export]")?.addEventListener("click", () => exportEpisode(item));
+  card.querySelector("[data-dataset-convert]")?.addEventListener("click", () => convertDataset(item));
+  return card;
+}
+function renderDatasetList(id, countId, items, category) {
+  const list = $(id); list.replaceChildren(); text(countId, `${items.length} 项`);
+  if (!items.length) { list.innerHTML = `<div class="job-empty"><strong>暂无记录</strong><span>完成采集或转换后会显示在这里</span></div>`; return; }
+  items.forEach((item) => list.appendChild(datasetCard(item, category)));
+}
+async function showDatasetDetail(path) {
+  try {
+    const detail = await fetch(`/api/datasets/detail/${encodeURIComponent(path)}`, { cache: "no-store" }).then(async (response) => { const data = await response.json(); if (!response.ok) throw new Error(data.message || `HTTP ${response.status}`); return data; });
+    const files = (detail.files || []).slice(0, 8).map((file) => `${file.path} (${formatBytes(file.bytes)})`).join("\n");
+    $("datasetDetail").innerHTML = `<strong>${detail.name}</strong><span>${detail.path} · ${formatBytes(detail.bytes)} · ${detail.file_count} 个文件</span><pre>${files || "目录为空"}</pre>`;
+  } catch (error) { toast(error.message, true); }
+}
+async function refreshDatasets(showError = false) {
+  try {
+    const data = await fetch("/api/datasets", { cache: "no-store" }).then(async (response) => { const value = await response.json(); if (!response.ok) throw new Error(value.message || `HTTP ${response.status}`); return value; });
+    badge($("datasetApiBadge"), true, "数据在线", "数据离线");
+    renderDatasetList("episodeDatasetList", "episodeDatasetCount", data.episodes || [], "episodes");
+    renderDatasetList("exportDatasetList", "exportDatasetCount", data.exports || [], "exports");
+    renderDatasetList("lerobotDatasetList", "lerobotDatasetCount", data.lerobot || [], "lerobot");
+  } catch (error) { badge($("datasetApiBadge"), false, "数据在线", "数据离线"); if (showError) toast(error.message, true); }
+}
+async function exportEpisode(item) {
+  if (!state.token) { openToken(); return; }
+  try { await createJob("dataset.export_episode", { episode: item.path, output: `datasets/exports/${item.name}` }); await refreshDatasets(); } catch (error) { toast(error.message, true); }
+}
+async function convertDataset(item) {
+  if (!state.token) { openToken(); return; }
+  try { await createJob("dataset.convert_lerobot", { dataset: item.path, output: `datasets/lerobot/${item.name}` }); await refreshDatasets(); } catch (error) { toast(error.message, true); }
+}async function refreshJobs(showError = false) {
   if (!state.token) {
     $("jobApiBadge").className = "pill neutral";
     $("jobApiBadge").innerHTML = "<i></i>需要令牌";
@@ -1107,6 +1154,7 @@ refreshPipeline();
 refreshPipelineHistory();
 refreshComponents();
 refreshJobs();
+refreshDatasets();
 
 function formatBytes(value) {
   const bytes = Number(value || 0);
@@ -1222,3 +1270,4 @@ setInterval(refreshActiveDebug, 1000);
 setInterval(refreshPipelineHistory, 5000);
 setInterval(refreshComponents, 2000);
 setInterval(() => refreshJobs(), 2000);
+setInterval(() => refreshDatasets(), 5000);

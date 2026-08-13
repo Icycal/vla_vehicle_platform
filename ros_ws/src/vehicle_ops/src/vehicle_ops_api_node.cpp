@@ -123,8 +123,34 @@ std::string json_escape(const std::string & value)
   }
   return output.str();
 }
-std::string json_string(const std::string & value) {return "\"" + json_escape(value) + "\"";}
-std::vector<std::string> split_lines(const std::string & body)
+std::string json_string(const std::string & value) {return "\"" + json_escape(value) + "\"";}std::string url_decode(std::string value)
+{
+  std::string output;
+  output.reserve(value.size());
+  for (std::size_t index = 0; index < value.size(); ++index) {
+    if (value[index] == '%' && index + 2 < value.size()) {
+      const auto hex = value.substr(index + 1, 2);
+      try { output.push_back(static_cast<char>(std::stoi(hex, nullptr, 16))); index += 2; continue; } catch (...) {}
+    }
+    if (value[index] == '+') {output.push_back(' ');} else {output.push_back(value[index]);}
+  }
+  return output;
+}
+std::string file_time_string(const std::filesystem::path & path)
+{
+  try { return std::to_string(std::chrono::duration_cast<std::chrono::seconds>(std::filesystem::last_write_time(path).time_since_epoch()).count()); }
+  catch (...) { return {}; }
+}
+std::uint64_t directory_bytes(const std::filesystem::path & path, std::uint64_t & files)
+{
+  std::uint64_t total = 0; files = 0;
+  try { for (const auto & entry : std::filesystem::recursive_directory_iterator(path, std::filesystem::directory_options::skip_permission_denied)) { if (entry.is_regular_file()) { total += entry.file_size(); ++files; } } } catch (...) {}
+  return total;
+}
+std::uint64_t count_lines(const std::filesystem::path & path)
+{
+  std::ifstream input(path); std::uint64_t count = 0; std::string line; while (std::getline(input, line)) { ++count; } return count;
+}std::vector<std::string> split_lines(const std::string & body)
 {
   std::vector<std::string> values;
   std::istringstream stream(body);
@@ -372,6 +398,8 @@ private:
   HttpResponse storage_status();
   HttpResponse storage_items(const std::string & category_id);
   HttpResponse storage_cleanup(const std::string & body);
+  HttpResponse dataset_catalog();
+  HttpResponse dataset_detail(const std::string & relative_path);
   HttpResponse task(const std::string & body);
   HttpResponse start_episode(const std::string & body);
   HttpResponse stop_episode();
@@ -639,6 +667,10 @@ HttpResponse VehicleOpsApi::route(const HttpRequest & request)
   }
   if (request.method == "GET" && path == "/api/components") {return components_list();}
   if (request.method == "GET" && path == "/api/storage") {return storage_status();}
+  if (request.method == "GET" && path == "/api/datasets") {return dataset_catalog();}
+  if (request.method == "GET" && path.rfind("/api/datasets/detail/", 0) == 0) {
+    return dataset_detail(url_decode(path.substr(std::string("/api/datasets/detail/").size())));
+  }
   if (request.method == "GET" && path.rfind("/api/storage/items/", 0) == 0) {
     const auto denied = authorize(request);
     if (denied) {return *denied;}
@@ -900,6 +932,60 @@ HttpResponse VehicleOpsApi::component_log(const std::string & component_id)
   return {200, "text/plain; charset=utf-8", response->content, {{"Cache-Control", "no-store"}}};
 }
 
+HttpResponse VehicleOpsApi::dataset_catalog()
+{
+  namespace fs = std::filesystem;
+  nlohmann::json result{{"schema_version", "vehicle.ops.dataset-catalog.v1"}, {"episodes", nlohmann::json::array()}, {"exports", nlohmann::json::array()}, {"lerobot", nlohmann::json::array()}};
+  std::string active_episode_id;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (episode_.message && episode_.message->state == vehicle_interfaces::msg::EpisodeState::STATE_RECORDING) {active_episode_id = episode_->episode_id;}
+  }
+  const auto scan = [&](const std::string & category, nlohmann::json & output) {
+    const fs::path root = fs::path(project_root_) / "datasets" / category;
+    if (!fs::exists(root)) {return;}
+    for (const auto & entry : fs::directory_iterator(root, fs::directory_options::skip_permission_denied)) {
+      if (!entry.is_directory()) {continue;}
+      std::uint64_t files = 0;
+      const auto bytes = directory_bytes(entry.path(), files);
+      nlohmann::json item{{"id", entry.path().filename().string()}, {"path", "datasets/" + category + "/" + entry.path().filename().string()}, {"name", entry.path().filename().string()}, {"bytes", bytes}, {"file_count", files}, {"modified_at", file_time_string(entry.path())}, {"protected", category == "episodes" && entry.path().filename().string() == active_episode_id}};
+      const auto manifest = entry.path() / (category == "episodes" ? "episode_manifest.json" : "dataset_manifest.json");
+      if (fs::exists(manifest)) {
+        try { item["manifest"] = nlohmann::json::parse(std::ifstream(manifest)); } catch (...) { item["manifest_error"] = true; }
+      }
+      if (category == "episodes") {
+        item["frame_count"] = count_lines(entry.path() / "frames.jsonl");
+        item["format"] = "vehicle.episode.v1 / rosbag2";
+      } else if (category == "exports") {
+        item["frame_count"] = count_lines(entry.path() / "frames.jsonl");
+        item["format"] = "vehicle.dataset.v1";
+      } else {
+        item["format"] = "LeRobot";
+        item["frame_count"] = fs::exists(entry.path() / "data") ? files : 0;
+        item["training_ready"] = fs::exists(entry.path() / "meta" / "info.json");
+      }
+      output.push_back(item);
+    }
+  };
+  scan("episodes", result["episodes"]);
+  scan("exports", result["exports"]);
+  scan("lerobot", result["lerobot"]);
+  return {200, "application/json; charset=utf-8", result.dump() + "\n", {{"Cache-Control", "no-store"}}};
+}
+HttpResponse VehicleOpsApi::dataset_detail(const std::string & relative_path)
+{
+  namespace fs = std::filesystem;
+  if (relative_path.empty() || relative_path.find("..") != std::string::npos || relative_path.find('\\') != std::string::npos) {return error(400, "Invalid dataset path");}
+  const auto root = fs::weakly_canonical(fs::path(project_root_) / "datasets");
+  const auto path = fs::weakly_canonical(fs::path(project_root_) / relative_path);
+  if (!fs::is_directory(path) || (path != root && path.string().rfind((root / "").string(), 0) != 0)) {return error(404, "Dataset not found under datasets/");}
+  std::uint64_t files = 0;
+  nlohmann::json result{{"path", relative_path}, {"name", path.filename().string()}, {"bytes", directory_bytes(path, files)}, {"file_count", files}, {"modified_at", file_time_string(path)}, {"files", nlohmann::json::array()}};
+  for (const auto & entry : fs::recursive_directory_iterator(path, fs::directory_options::skip_permission_denied)) {
+    if (entry.is_regular_file()) {result["files"].push_back({{"path", fs::relative(entry.path(), path).generic_string()}, {"bytes", entry.file_size()}});}
+  }
+  return {200, "application/json; charset=utf-8", result.dump() + "\n", {{"Cache-Control", "no-store"}}};
+}
 HttpResponse VehicleOpsApi::storage_status()
 {
   if (!storage_status_client_->wait_for_service(250ms)) {return error(503, "Storage Manager is unavailable");}
