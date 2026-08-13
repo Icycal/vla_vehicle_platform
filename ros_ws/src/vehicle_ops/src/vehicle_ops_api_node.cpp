@@ -1005,8 +1005,10 @@ HttpResponse VehicleOpsApi::dataset_download(const std::string & archive_name)
   if (archive_name.empty() || archive_name.find("..") != std::string::npos || archive_name.find('/') != std::string::npos || archive_name.find('\\') != std::string::npos || archive_name.size() > 160) {return error(400, "Invalid archive name");}
   const auto root = fs::weakly_canonical(fs::path(project_root_) / "run/ops/exports");
   const auto archive = fs::weakly_canonical(root / archive_name);
-  if (!fs::is_regular_file(archive) || archive.extension() != ".zip" || !is_within(archive, root)) {return error(404, "Export archive not found");}
-  if (archive.file_size() > 512ULL * 1024ULL * 1024ULL) {return error(413, "Export archive is too large for the current download endpoint");}
+  const auto archive_string = archive.string();
+  const auto root_string = (root / "").string();
+  if (!fs::is_regular_file(archive) || archive.extension() != ".zip" || archive_string.rfind(root_string, 0) != 0) {return error(404, "Export archive not found");}
+  if (fs::file_size(archive) > 512ULL * 1024ULL * 1024ULL) {return error(413, "Export archive is too large for the current download endpoint");}
   return {200, "application/zip", read_file(archive), {{"Content-Disposition", "attachment; filename=\"" + archive.filename().string() + "\""}, {"Cache-Control", "no-store"}}};
 }
 HttpResponse VehicleOpsApi::storage_status()
