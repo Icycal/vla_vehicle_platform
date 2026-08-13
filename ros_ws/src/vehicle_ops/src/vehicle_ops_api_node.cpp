@@ -940,7 +940,7 @@ HttpResponse VehicleOpsApi::dataset_catalog()
   std::string active_episode_id;
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (episode_.message && episode_.message->state == vehicle_interfaces::msg::EpisodeState::STATE_RECORDING) {active_episode_id = episode_->episode_id;}
+    if (episode_.message && episode_.message->state == vehicle_interfaces::msg::EpisodeState::STATE_RECORDING) {active_episode_id = episode_.message->episode_id;}
   }
   const auto scan = [&](const std::string & category, nlohmann::json & output) {
     const fs::path root = fs::path(project_root_) / "datasets" / category;
