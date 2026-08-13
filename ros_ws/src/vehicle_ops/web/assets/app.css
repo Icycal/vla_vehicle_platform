@@ -267,3 +267,89 @@ footer{flex-direction:column;gap:6px}
 @media(max-width:760px){.metrics-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.storage-hero{grid-template-columns:1fr;justify-items:center}.storage-capacity{width:100%;grid-template-columns:repeat(3,minmax(0,1fr))}.storage-capacity p{text-align:center}.storage-category-grid{grid-template-columns:1fr}.storage-category-card{align-items:flex-start}.storage-overview-card,.storage-category-panel,.storage-items-panel{padding:16px}}
 @media(max-width:520px){.metrics-grid{grid-template-columns:1fr}.storage-capacity{grid-template-columns:1fr}.storage-actions{width:100%;justify-content:stretch}.storage-actions .button{flex:1}.storage-item{grid-template-columns:22px minmax(0,1fr)}.storage-item-size{grid-column:2;text-align:left;max-width:100%}}
 .active-debug-panel{margin-bottom:14px}.active-debug-form{display:grid;grid-template-columns:minmax(0,2fr) repeat(3,minmax(110px,.7fr));gap:10px;margin:12px 0}.active-debug-form label{display:grid;gap:6px;color:var(--muted);font-size:9px}.active-debug-form textarea,.active-debug-form input{width:100%;box-sizing:border-box}.active-debug-stats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin-top:12px}.active-debug-stats>div{min-width:0;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#091725}.active-debug-stats small,.active-debug-stats strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.active-debug-stats strong{margin-top:5px;color:var(--text)}@media(max-width:900px){.active-debug-form{grid-template-columns:1fr 1fr}.active-debug-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* Active task debug layout hardening */
+.active-debug-panel{
+  min-width:0;
+  box-sizing:border-box;
+  padding:20px;
+  overflow:hidden;
+}
+.active-debug-panel .section-heading{
+  align-items:flex-start;
+  flex-wrap:wrap;
+  gap:12px 18px;
+}
+.active-debug-panel .section-heading>div{
+  min-width:0;
+  flex:1 1 480px;
+}
+.active-debug-panel .section-heading h2,
+.active-debug-panel .component-intro{
+  max-width:100%;
+  overflow-wrap:anywhere;
+  word-break:break-word;
+}
+.active-debug-panel .section-heading .pill{
+  flex:0 0 auto;
+  max-width:100%;
+  white-space:normal;
+  overflow-wrap:anywhere;
+}
+.active-debug-form{
+  min-width:0;
+  grid-template-columns:minmax(260px,2fr) repeat(3,minmax(130px,.8fr));
+}
+.active-debug-form label{
+  min-width:0;
+}
+.active-debug-form textarea,
+.active-debug-form input{
+  min-width:0;
+  max-width:100%;
+  box-sizing:border-box;
+}
+.active-debug-panel>.button-row{
+  min-width:0;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+}
+.active-debug-panel>.button-row .button{
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.active-debug-stats{
+  min-width:0;
+  grid-template-columns:repeat(5,minmax(0,1fr));
+}
+.active-debug-stats>div{
+  min-width:0;
+  overflow:hidden;
+}
+.active-debug-stats small{
+  overflow-wrap:anywhere;
+  white-space:normal;
+}
+.active-debug-stats strong{
+  max-width:100%;
+  overflow-wrap:anywhere;
+  word-break:break-word;
+  white-space:normal;
+}
+@media(max-width:1250px){
+  .active-debug-form{grid-template-columns:minmax(0,1fr) repeat(3,minmax(110px,.7fr))}
+  .active-debug-stats{grid-template-columns:repeat(3,minmax(0,1fr))}
+}
+@media(max-width:900px){
+  .active-debug-panel{padding:16px}
+  .active-debug-form{grid-template-columns:1fr 1fr}
+  .active-debug-form label:first-child{grid-column:1/-1}
+  .active-debug-stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:560px){
+  .active-debug-form{grid-template-columns:1fr}
+  .active-debug-form label:first-child{grid-column:auto}
+  .active-debug-panel>.button-row{grid-template-columns:1fr}
+  .active-debug-stats{grid-template-columns:1fr}
+}
