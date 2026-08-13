@@ -133,7 +133,8 @@ std::filesystem::path JobManager::resolve_input(const std::string & value) const
   const auto resolved = std::filesystem::weakly_canonical(project_root_ / requested);
   const std::vector<std::filesystem::path> roots{
     std::filesystem::weakly_canonical(project_root_ / "datasets"),
-    std::filesystem::weakly_canonical(project_root_ / "run/test")};
+    std::filesystem::weakly_canonical(project_root_ / "run/test"),
+    std::filesystem::weakly_canonical(project_root_ / "run/ops/exports")};
   if (!std::filesystem::exists(resolved) ||
     std::none_of(roots.begin(), roots.end(), [&](const auto & root) {return is_within(resolved, root);}))
   {
@@ -151,9 +152,10 @@ std::filesystem::path JobManager::resolve_output(const std::string & value) cons
   const auto resolved = std::filesystem::weakly_canonical(project_root_ / requested);
   const std::vector<std::filesystem::path> roots{
     std::filesystem::weakly_canonical(project_root_ / "datasets"),
-    std::filesystem::weakly_canonical(project_root_ / "run/test")};
+    std::filesystem::weakly_canonical(project_root_ / "run/test"),
+    std::filesystem::weakly_canonical(project_root_ / "run/ops/exports")};
   if (std::none_of(roots.begin(), roots.end(), [&](const auto & root) {return is_within(resolved, root);})) {
-    throw std::invalid_argument("Output path must stay under datasets/ or run/test/");
+    throw std::invalid_argument("Output path must stay under datasets/, run/test/ or run/ops/exports/");
   }
   return resolved;
 }
@@ -188,10 +190,27 @@ std::string JobManager::create(const std::string & request_body)
     job->command = {(scripts / "split_vehicle_dataset.sh").string(),
       resolve_output(required_string(parameters, "output")).string(),
       resolve_input(required_string(parameters, "dataset")).string()};
+  } else if (type == "dataset.archive_lerobot") {
+    const auto datasets = parameters.value("datasets", Json::array());
+    if (!datasets.is_array() || datasets.empty()) {throw std::invalid_argument("Parameter 'datasets' must contain at least one dataset");}
+    job->command = {(scripts / "archive_dataset.sh").string(), resolve_output(required_string(parameters, "output")).string()};
+    for (const auto & dataset : datasets) {
+      if (!dataset.is_string()) {throw std::invalid_argument("Each dataset path must be a string");}
+      job->command.push_back(resolve_input(dataset.get<std::string>()).string());
+    }
   } else if (type == "dataset.convert_lerobot") {
-    job->command = {(scripts / "convert_lerobot_dataset.sh").string(),
-      resolve_output(required_string(parameters, "output")).string(),
-      resolve_input(required_string(parameters, "dataset")).string()};
+    const auto datasets = parameters.value("datasets", Json::array());
+    if (datasets.is_array() && !datasets.empty()) {
+      job->command = {(scripts / "convert_lerobot_dataset.sh").string(), resolve_output(required_string(parameters, "output")).string()};
+      for (const auto & dataset : datasets) {
+        if (!dataset.is_string()) {throw std::invalid_argument("Each dataset path must be a string");}
+        job->command.push_back(resolve_input(dataset.get<std::string>()).string());
+      }
+    } else {
+      job->command = {(scripts / "convert_lerobot_dataset.sh").string(),
+        resolve_output(required_string(parameters, "output")).string(),
+        resolve_input(required_string(parameters, "dataset")).string()};
+    }
   } else if (type == "policy.health_check") {
     if (!parameters.empty()) {throw std::invalid_argument("policy.health_check accepts no parameters");}
     job->command = {(scripts / "verify_smolvla_model_offline.sh").string()};

@@ -400,6 +400,7 @@ private:
   HttpResponse storage_cleanup(const std::string & body);
   HttpResponse dataset_catalog();
   HttpResponse dataset_detail(const std::string & relative_path);
+  HttpResponse dataset_download(const std::string & archive_name);
   HttpResponse task(const std::string & body);
   HttpResponse start_episode(const std::string & body);
   HttpResponse stop_episode();
@@ -672,6 +673,10 @@ HttpResponse VehicleOpsApi::route(const HttpRequest & request)
   if (request.method == "GET" && path.rfind("/api/datasets/detail/", 0) == 0) {
     return dataset_detail(url_decode(path.substr(std::string("/api/datasets/detail/").size())));
   }
+  if (request.method == "GET" && path.rfind("/api/datasets/download/", 0) == 0) {
+    const auto denied = authorize(request); if (denied) {return *denied;}
+    return dataset_download(url_decode(path.substr(std::string("/api/datasets/download/").size())));
+  }
   if (request.method == "GET" && path.rfind("/api/storage/items/", 0) == 0) {
     const auto denied = authorize(request);
     if (denied) {return *denied;}
@@ -936,7 +941,7 @@ HttpResponse VehicleOpsApi::component_log(const std::string & component_id)
 HttpResponse VehicleOpsApi::dataset_catalog()
 {
   namespace fs = std::filesystem;
-  nlohmann::json result{{"schema_version", "vehicle.ops.dataset-catalog.v1"}, {"episodes", nlohmann::json::array()}, {"exports", nlohmann::json::array()}, {"lerobot", nlohmann::json::array()}};
+  nlohmann::json result{{"schema_version", "vehicle.ops.dataset-catalog.v1"}, {"episodes", nlohmann::json::array()}, {"exports", nlohmann::json::array()}, {"lerobot", nlohmann::json::array()}, {"archives", nlohmann::json::array()}};
   std::string active_episode_id;
   {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -971,6 +976,13 @@ HttpResponse VehicleOpsApi::dataset_catalog()
   scan("episodes", result["episodes"]);
   scan("exports", result["exports"]);
   scan("lerobot", result["lerobot"]);
+  const auto archive_root = fs::path(project_root_) / "run/ops/exports";
+  if (fs::exists(archive_root)) {
+    for (const auto & entry : fs::directory_iterator(archive_root, fs::directory_options::skip_permission_denied)) {
+      if (!entry.is_regular_file() || entry.path().extension() != ".zip") {continue;}
+      result["archives"].push_back({{"name", entry.path().filename().string()}, {"path", "run/ops/exports/" + entry.path().filename().string()}, {"bytes", entry.file_size()}, {"modified_at", file_time_string(entry.path())}});
+    }
+  }
   return {200, "application/json; charset=utf-8", result.dump() + "\n", {{"Cache-Control", "no-store"}}};
 }
 HttpResponse VehicleOpsApi::dataset_detail(const std::string & relative_path)
@@ -986,6 +998,16 @@ HttpResponse VehicleOpsApi::dataset_detail(const std::string & relative_path)
     if (entry.is_regular_file()) {result["files"].push_back({{"path", fs::relative(entry.path(), path).generic_string()}, {"bytes", entry.file_size()}});}
   }
   return {200, "application/json; charset=utf-8", result.dump() + "\n", {{"Cache-Control", "no-store"}}};
+}
+HttpResponse VehicleOpsApi::dataset_download(const std::string & archive_name)
+{
+  namespace fs = std::filesystem;
+  if (archive_name.empty() || archive_name.find("..") != std::string::npos || archive_name.find('/') != std::string::npos || archive_name.find('\\') != std::string::npos || archive_name.size() > 160) {return error(400, "Invalid archive name");}
+  const auto root = fs::weakly_canonical(fs::path(project_root_) / "run/ops/exports");
+  const auto archive = fs::weakly_canonical(root / archive_name);
+  if (!fs::is_regular_file(archive) || archive.extension() != ".zip" || !is_within(archive, root)) {return error(404, "Export archive not found");}
+  if (archive.file_size() > 512ULL * 1024ULL * 1024ULL) {return error(413, "Export archive is too large for the current download endpoint");}
+  return {200, "application/zip", read_file(archive), {{"Content-Disposition", "attachment; filename=\"" + archive.filename().string() + "\""}, {"Cache-Control", "no-store"}}};
 }
 HttpResponse VehicleOpsApi::storage_status()
 {

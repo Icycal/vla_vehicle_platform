@@ -1,5 +1,5 @@
 ﻿const $ = (id) => document.getElementById(id);
-const state = { token: sessionStorage.getItem("vehicleOpsToken") || "", cameraSequence: 0, pipelineCameraSequence: 0, cameraStatus: null, pipelineCameraActive: false, selectedJobId: "", jobs: [], debugRunId: "", debugResult: null, debugImageUrls: {}, pipelineTrace: null, pipelineHistory: [], selectedPipelineStageId: "", selectedPipelineHistoryId: "", inspectorMode: "live", components: [], componentProfiles: [], selectedComponentId: "", storage: null, storageItems: [], selectedStorageCategory: "", systemMode: "", debugInputSource: "camera", debugUpload: null, observationWidth: 640, observationHeight: 480 };
+const state = { selectedLerobotPath: "", token: sessionStorage.getItem("vehicleOpsToken") || "", cameraSequence: 0, pipelineCameraSequence: 0, cameraStatus: null, pipelineCameraActive: false, selectedJobId: "", jobs: [], debugRunId: "", debugResult: null, debugImageUrls: {}, pipelineTrace: null, pipelineHistory: [], selectedPipelineStageId: "", selectedPipelineHistoryId: "", inspectorMode: "live", components: [], componentProfiles: [], selectedComponentId: "", storage: null, storageItems: [], selectedStorageCategory: "", systemMode: "", debugInputSource: "camera", debugUpload: null, observationWidth: 640, observationHeight: 480 };
 const text = (id, value) => { $(id).textContent = value ?? "—"; };
 const number = (value, digits = 1) => Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : "--";
 function setMetricTooltip(valueId, heading, rows) {
@@ -259,6 +259,11 @@ $("safeStop").addEventListener("click", async () => {
 });
 document.querySelectorAll("[data-view]").forEach((button) => button.addEventListener("click", () => setView(button.dataset.view)));
 document.querySelectorAll("[data-open-view]").forEach((button) => button.addEventListener("click", () => setView(button.dataset.openView)));
+$("convertSelectedDatasets")?.addEventListener("click", convertSelectedDatasets);
+$("archiveSelectedLerobot")?.addEventListener("click", () => { const items = state.lerobotItems || [];
+  const selected = selectedLerobotPaths();
+  const item = items.find((value) => selected.includes(value.path)) || items[0];
+  if (item) archiveLerobot(item); else toast("请先生成 LeRobot 数据集", true); });
 $("refreshDatasets")?.addEventListener("click", () => refreshDatasets(true));
 $("tokenButton").addEventListener("click", openToken);
 $("tokenClose").addEventListener("click", closeToken);
@@ -338,10 +343,11 @@ function datasetCard(item, category) {
   const card = document.createElement("div");
   card.className = `dataset-item${item.protected ? " protected" : ""}`;
   const state = category === "lerobot" ? (item.training_ready ? "训练可用" : "需校验") : item.format;
-  card.innerHTML = `<div><strong title="${item.name}">${item.name}</strong><small>${state} · ${formatBytes(item.bytes)} · ${item.frame_count || 0} 帧</small></div><div class="dataset-item-actions"><button class="button ghost compact-button" data-dataset-detail>详情</button>${category === "episodes" && !item.protected ? `<button class="button secondary compact-button" data-dataset-export>导出</button>` : ""}${category === "exports" ? `<button class="button secondary compact-button" data-dataset-convert>转 LeRobot</button>` : ""}</div>`;
+  card.innerHTML = `<div class="dataset-item-main">${["exports", "lerobot"].includes(category) ? `<label class="dataset-check"><input type="checkbox" data-dataset-select="${category}" value="${item.path}"><span></span></label>` : ""}<div><strong title="${item.name}">${item.name}</strong><small>${state} · ${formatBytes(item.bytes)} · ${item.frame_count || 0} 帧</small></div></div><div class="dataset-item-actions"><button class="button ghost compact-button" data-dataset-detail>详情</button>${category === "episodes" && !item.protected ? `<button class="button secondary compact-button" data-dataset-export>导出</button>` : ""}${category === "exports" ? `<button class="button secondary compact-button" data-dataset-convert>转 LeRobot</button>` : ""}${category === "lerobot" ? `<button class="button secondary compact-button" data-dataset-archive>导出训练包</button>` : ""}</div>`;
   card.querySelector("[data-dataset-detail]").addEventListener("click", () => showDatasetDetail(item.path));
   card.querySelector("[data-dataset-export]")?.addEventListener("click", () => exportEpisode(item));
   card.querySelector("[data-dataset-convert]")?.addEventListener("click", () => convertDataset(item));
+  card.querySelector("[data-dataset-archive]")?.addEventListener("click", () => archiveLerobot(item));
   return card;
 }
 function renderDatasetList(id, countId, items, category) {
@@ -362,10 +368,60 @@ async function refreshDatasets(showError = false) {
     badge($("datasetApiBadge"), true, "数据在线", "数据离线");
     renderDatasetList("episodeDatasetList", "episodeDatasetCount", data.episodes || [], "episodes");
     renderDatasetList("exportDatasetList", "exportDatasetCount", data.exports || [], "exports");
-    renderDatasetList("lerobotDatasetList", "lerobotDatasetCount", data.lerobot || [], "lerobot");
+    state.lerobotItems = data.lerobot || []; renderDatasetList("lerobotDatasetList", "lerobotDatasetCount", state.lerobotItems, "lerobot");
+    renderDatasetArchives(data.archives || []);
   } catch (error) { badge($("datasetApiBadge"), false, "数据在线", "数据离线"); if (showError) toast(error.message, true); }
 }
-async function exportEpisode(item) {
+async function downloadDatasetArchive(name) {
+  if (!state.token) { openToken(); return; }
+  try {
+    const response = await fetch(`/api/datasets/download/${encodeURIComponent(name)}`, {headers: {"X-Ops-Token": state.token}});
+    if (!response.ok) { const result = await response.json(); throw new Error(result.message || `HTTP ${response.status}`); }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = name;
+    link.click();
+    URL.revokeObjectURL(url);
+  } catch (error) { toast(error.message, true); }
+}
+function renderDatasetArchives(archives) {
+  const summary = $("lerobotExportSummary");
+  if (!archives.length) { summary.textContent = "选择 LeRobot 数据集后生成训练包并下载到 x86"; return; }
+  const latest = archives[0];
+  summary.innerHTML = `??????${latest.name} ? ${formatBytes(latest.bytes)} <button class="button ghost compact-button" data-download-archive>??? x86</button>`;
+  summary.querySelector("[data-download-archive]").addEventListener("click", () => downloadDatasetArchive(latest.name));
+}function updateDatasetSelectionSummary() {
+  const exportsCount = document.querySelectorAll("[data-dataset-select=exports]:checked").length;
+  const lerobotCount = document.querySelectorAll("[data-dataset-select=lerobot]:checked").length;
+  if ($("datasetSelectionSummary")) $("datasetSelectionSummary").textContent = exportsCount ? `??? ${exportsCount} ???????` : "?????????????????";
+  if ($("lerobotExportSummary") && !document.querySelector("[data-download-archive]")) $("lerobotExportSummary").textContent = lerobotCount ? `??? ${lerobotCount} ? LeRobot ??????????` : "?? LeRobot ????????????? x86";
+}
+document.addEventListener("change", (event) => { if (event.target.matches?.("[data-dataset-select]")) updateDatasetSelectionSummary(); });
+function selectedExportPaths() {
+  return [...document.querySelectorAll("[data-dataset-select=exports]:checked")].map((input) => input.value);
+}
+function selectedLerobotPaths() {
+  return [...document.querySelectorAll("[data-dataset-select=lerobot]:checked")].map((input) => input.value);
+}
+async function convertSelectedDatasets() {
+  const datasets = selectedExportPaths();
+  const name = $("lerobotOutputName").value.trim();
+  if (!datasets.length) {toast("请先勾选至少一个中间数据", true); return;}
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{1,99}$/.test(name)) {toast("数据集名称只能使用字母、数字、点、下划线和短横线", true); return;}
+  try { await createJob("dataset.convert_lerobot", { datasets, output: `datasets/lerobot/${name}` }); toast("LeRobot 转换任务已提交"); await refreshDatasets(); } catch (error) {toast(error.message, true);}
+}
+async function archiveLerobot(item) {
+  if (!state.token) { openToken(); return; }
+  const selected = selectedLerobotPaths();
+  const datasets = selected.length ? selected : [item.path];
+  const name = datasets.length === 1 ? item.name : `lerobot-selection-${Date.now()}`;
+  try {
+    await createJob("dataset.archive_lerobot", { datasets, output: `run/ops/exports/${name}.zip` });
+    toast("??????????????????????");
+  } catch (error) { toast(error.message, true); }
+}async function exportEpisode(item) {
   if (!state.token) { openToken(); return; }
   try { await createJob("dataset.export_episode", { episode: item.path, output: `datasets/exports/${item.name}` }); await refreshDatasets(); } catch (error) { toast(error.message, true); }
 }
