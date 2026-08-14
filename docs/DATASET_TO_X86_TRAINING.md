@@ -12,7 +12,7 @@
   → x86 训练服务器
 ```
 
-### 原始 Episode
+### 原始 Episode：采集原件
 
 数据采集页面开始录制后，`episode_recorder` 将数据保存到：
 
@@ -20,9 +20,9 @@
 datasets/episodes/<episode-id>
 ```
 
-它包含 rosbag2 数据和 `episode_manifest.json`，用于完整审计、回放和重新导出。原始 Episode 不是 SmolVLA/LeRobot 可以直接训练的格式。
+它包含 rosbag2 数据和 `episode_manifest.json`，是采集过程的原始证据，用于完整审计、回放和重新整理。它不是 SmolVLA/LeRobot 可以直接训练的格式，也不是页面上的“下载文件”。
 
-### `vehicle.dataset.v1`
+### `vehicle.dataset.v1`：平台中间数据
 
 通过 Episode 导出生成：
 
@@ -30,7 +30,7 @@ datasets/episodes/<episode-id>
 datasets/exports/<episode-id>
 ```
 
-这是平台自己的模型无关中间格式，负责把原始 ROS 记录整理成稳定的训练样本：
+这是平台自己的、与具体 VLA 模型无关的中间格式，负责把原始 ROS 记录整理成稳定的训练样本。它可以理解为“原始采集”和“某个训练框架格式”之间的标准交换层：
 
 - 图像和图像相对路径；
 - Observation ID、Episode ID 和时间戳；
@@ -41,7 +41,7 @@ datasets/exports/<episode-id>
 
 中间格式的意义是：以后换 SmolVLA、OpenVLA 或其他 VLA 时，不需要重新解析 rosbag2，只需要增加新的 Dataset Adapter。
 
-### LeRobot Dataset
+### LeRobot Dataset：训练适配结果
 
 通过 LeRobot Adapter 生成：
 
@@ -49,7 +49,7 @@ datasets/exports/<episode-id>
 datasets/lerobot/<dataset-name>
 ```
 
-该目录包含 `meta/`、`data/`、Parquet 文件和转换 Manifest，是当前可直接交给 LeRobot/SmolVLA 训练脚本的最终训练数据格式。
+该目录包含 `meta/`、`data/`、Parquet 文件和转换 Manifest，是当前可直接交给 LeRobot/SmolVLA 训练脚本的训练格式。它已经不是原始数据，而是针对 LeRobot 生态的适配结果；未来接入 OpenVLA 或其他框架时，可以从同一份 `vehicle.dataset.v1` 生成对应格式。
 
 ## 2. 推荐网页操作流程
 
@@ -71,12 +71,12 @@ http://10.101.70.232:8088/#capture
 
 录制过程中不要在存储管理页面删除当前 Episode。
 
-### 第二步：导出中间数据
+### 第二步：生成中间数据
 
 进入“工程工具”页面，在“Episode 与数据集管理”中：
 
 1. 在左侧“原始 Episode”找到刚采集的 Episode；
-2. 点击“导出”；
+2. 点击“生成中间数据”；
 3. 系统通过白名单 Job 执行 `scripts/export_episode.sh`；
 4. 成功后，中间数据出现在中间栏：
 
