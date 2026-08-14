@@ -1,5 +1,5 @@
 ﻿const $ = (id) => document.getElementById(id);
-const state = { datasetCatalog: { episodes: [], exports: [], lerobot: [], archives: [] }, selectedLerobotPath: "", token: sessionStorage.getItem("vehicleOpsToken") || "", cameraSequence: 0, pipelineCameraSequence: 0, cameraStatus: null, pipelineCameraActive: false, selectedJobId: "", jobs: [], debugRunId: "", debugResult: null, debugImageUrls: {}, pipelineTrace: null, pipelineHistory: [], selectedPipelineStageId: "", selectedPipelineHistoryId: "", inspectorMode: "live", components: [], componentProfiles: [], selectedComponentId: "", storage: null, storageItems: [], selectedStorageCategory: "", systemMode: "", debugInputSource: "camera", debugUpload: null, observationWidth: 640, observationHeight: 480 };
+const state = { datasetCatalog: { episodes: [], exports: [], lerobot: [], archives: [] }, datasetFailureLogJobId: "", datasetFailureLog: "", selectedLerobotPath: "", token: sessionStorage.getItem("vehicleOpsToken") || "", cameraSequence: 0, pipelineCameraSequence: 0, cameraStatus: null, pipelineCameraActive: false, selectedJobId: "", jobs: [], debugRunId: "", debugResult: null, debugImageUrls: {}, pipelineTrace: null, pipelineHistory: [], selectedPipelineStageId: "", selectedPipelineHistoryId: "", inspectorMode: "live", components: [], componentProfiles: [], selectedComponentId: "", storage: null, storageItems: [], selectedStorageCategory: "", systemMode: "", debugInputSource: "camera", debugUpload: null, observationWidth: 640, observationHeight: 480 };
 const text = (id, value) => { $(id).textContent = value ?? "—"; };
 const number = (value, digits = 1) => Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : "--";
 function setMetricTooltip(valueId, heading, rows) {
@@ -396,6 +396,15 @@ function datasetJobSuffix(job) {
   if (!job) return "";
   return ` ? ${stateLabel(job.state)}`;
 }
+async function refreshDatasetFailureLog() {
+  const types = ["dataset.export_episode", "dataset.convert_lerobot", "dataset.archive_lerobot"];
+  const failed = (state.jobs || []).filter((job) => types.includes(job.job_type) && job.state === "failed").sort((a, b) => String(b.requested_at || b.created_at || b.id).localeCompare(String(a.requested_at || a.created_at || a.id))).at(0);
+  if (!failed) { state.datasetFailureLogJobId = ""; state.datasetFailureLog = ""; return; }
+  if (failed.id === state.datasetFailureLogJobId) return;
+  state.datasetFailureLogJobId = failed.id;
+  try { state.datasetFailureLog = await jobFetch(`/api/jobs/${encodeURIComponent(failed.id)}/log`); }
+  catch (error) { state.datasetFailureLog = error.message; }
+}
 function renderDatasetWorkflow(episodes, exports, lerobot, archives) {
   const stageJobs = { episodes: latestDatasetJob("dataset.export_episode"), exports: latestDatasetJob("dataset.export_episode"), lerobot: latestDatasetJob("dataset.convert_lerobot"), archive: latestDatasetJob("dataset.archive_lerobot") };
   ["episodes", "exports", "lerobot", "archive"].forEach((stage) => { const node = document.querySelector(`[data-flow-stage="${stage}"]`); if (node) node.classList.remove("active", "success", "failed"); });
@@ -417,12 +426,19 @@ function renderDatasetWorkflow(episodes, exports, lerobot, archives) {
   const active = ["dataset.export_episode", "dataset.convert_lerobot", "dataset.archive_lerobot"].map(latest).find((job) => job && ["queued", "running"].includes(job.state));
   const failed = ["dataset.export_episode", "dataset.convert_lerobot", "dataset.archive_lerobot"].map(latest).find((job) => job && job.state === "failed");
   status.replaceChildren();
+  status.classList.remove("error");
   if (active) {
     status.append(document.createTextNode(`\u6b63\u5728${active.job_type === "dataset.export_episode" ? "\u751f\u6210\u4e2d\u95f4\u6570\u636e" : active.job_type === "dataset.convert_lerobot" ? "\u8f6c\u6362 LeRobot \u6570\u636e\u96c6" : "\u751f\u6210\u8bad\u7ec3\u5305"} ? ${stateLabel(active.state)}`));
     return;
   }
   if (failed) {
-    status.textContent = `\u6700\u8fd1\u4efb\u52a1\u5931\u8d25\uff1a${failed.job_type === "dataset.export_episode" ? "\u4e2d\u95f4\u6570\u636e\u751f\u6210" : failed.job_type === "dataset.convert_lerobot" ? "LeRobot \u8f6c\u6362" : "\u8bad\u7ec3\u5305\u751f\u6210"}\uff0c\u8bf7\u5230\u4efb\u52a1\u65e5\u5fd7\u67e5\u770b\u539f\u56e0\u3002`;
+    status.classList.add("error");
+    const title = document.createElement("strong");
+    title.textContent = `\u6700\u8fd1\u4efb\u52a1\u5931\u8d25\uff1a${failed.job_type === "dataset.export_episode" ? "\u4e2d\u95f4\u6570\u636e\u751f\u6210" : failed.job_type === "dataset.convert_lerobot" ? "LeRobot \u8f6c\u6362" : "\u8bad\u7ec3\u5305\u751f\u6210"}`;
+    const detail = document.createElement("pre");
+    detail.className = "dataset-workflow-error-detail";
+    detail.textContent = (state.datasetFailureLog || "\u4efb\u52a1\u65e5\u5fd7\u6682\u65e0\u8f93\u51fa").trim().slice(-1600);
+    status.append(title, detail);
     return;
   }
   if (archives.length) {
@@ -463,6 +479,7 @@ async function convertDataset(item) {
   try {
     const result = await jobFetch("/api/jobs");
     state.jobs = result.jobs || [];
+    await refreshDatasetFailureLog();
     const catalog = state.datasetCatalog || { episodes: [], exports: [], lerobot: [], archives: [] };
     renderDatasetWorkflow(catalog.episodes, catalog.exports, catalog.lerobot, catalog.archives);
     $("jobApiBadge").className = "pill success";
