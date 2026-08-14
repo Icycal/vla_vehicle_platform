@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env bash
+#!/usr/bin/env bash
 set -euo pipefail
 
 OUTPUT_PATH="${1:?output zip path is required}"
@@ -10,11 +10,6 @@ fi
 
 OUTPUT_PATH="$(realpath -m "${OUTPUT_PATH}")"
 mkdir -p "$(dirname "${OUTPUT_PATH}")"
-if [[ -e "${OUTPUT_PATH}" ]]; then
-  echo "Output archive already exists: ${OUTPUT_PATH}" >&2
-  exit 2
-fi
-
 TEMP_PATH="${OUTPUT_PATH}.partial"
 rm -f "${TEMP_PATH}"
 INPUTS=()
@@ -38,7 +33,7 @@ done
   cd "${STAGING}"
   zip -qr "${TEMP_PATH}" .
 )
-mv "${TEMP_PATH}" "${OUTPUT_PATH}"
+mv -f "${TEMP_PATH}" "${OUTPUT_PATH}"
 trap - EXIT
 rm -rf "${STAGING}"
 echo "Created archive: ${OUTPUT_PATH}"
