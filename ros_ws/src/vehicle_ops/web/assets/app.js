@@ -96,7 +96,7 @@ function setView(name) {
   document.querySelectorAll("[data-view]").forEach((button) => button.classList.toggle("active", button.dataset.view === name));
   history.replaceState(null, "", `#${name}`);
   if (name === "storage") refreshStorage(true);
-  if (name === "tools") refreshDatasets(true);
+  if (name === "tools" || name === "capture") refreshDatasets(true);
 }
 function badge(node, healthy, yes, no) {
   node.className = `pill ${healthy ? "success" : "warning"}`;
@@ -259,11 +259,6 @@ $("safeStop").addEventListener("click", async () => {
 });
 document.querySelectorAll("[data-view]").forEach((button) => button.addEventListener("click", () => setView(button.dataset.view)));
 document.querySelectorAll("[data-open-view]").forEach((button) => button.addEventListener("click", () => setView(button.dataset.openView)));
-$("convertSelectedDatasets")?.addEventListener("click", convertSelectedDatasets);
-$("archiveSelectedLerobot")?.addEventListener("click", () => { const items = state.lerobotItems || [];
-  const selected = selectedLerobotPaths();
-  const item = items.find((value) => selected.includes(value.path)) || items[0];
-  if (item) archiveLerobot(item); else toast("请先生成 LeRobot 数据集", true); });
 $("refreshDatasets")?.addEventListener("click", () => refreshDatasets(true));
 $("tokenButton").addEventListener("click", openToken);
 $("tokenClose").addEventListener("click", closeToken);
@@ -343,7 +338,7 @@ function datasetCard(item, category) {
   const card = document.createElement("div");
   card.className = `dataset-item${item.protected ? " protected" : ""}`;
   const state = category === "lerobot" ? (item.training_ready ? "训练可用" : "需校验") : item.format;
-  card.innerHTML = `<div class="dataset-item-main">${["exports", "lerobot"].includes(category) ? `<label class="dataset-check"><input type="checkbox" data-dataset-select="${category}" value="${item.path}"><span></span></label>` : ""}<div><strong title="${item.name}">${item.name}</strong><small>${state} · ${formatBytes(item.bytes)} · ${item.frame_count || 0} 帧</small></div></div><div class="dataset-item-actions"><button class="button ghost compact-button" data-dataset-detail>详情</button>${category === "episodes" && !item.protected ? `<button class="button secondary compact-button" data-dataset-export>生成中间数据</button>` : ""}${category === "exports" ? `<button class="button secondary compact-button" data-dataset-convert>转 LeRobot</button>` : ""}${category === "lerobot" ? `<button class="button secondary compact-button" data-dataset-archive>生成训练包</button>` : ""}</div>`;
+  card.innerHTML = `<div class="dataset-item-main"><div><strong title="${item.name}">${item.name}</strong><small>${state} · ${formatBytes(item.bytes)} · ${item.frame_count || 0} 帧</small></div></div><div class="dataset-item-actions"><button class="button ghost compact-button" data-dataset-detail>详情</button>${category === "episodes" && !item.protected ? `<button class="button secondary compact-button" data-dataset-export>生成中间数据</button>` : ""}${category === "exports" ? `<button class="button secondary compact-button" data-dataset-convert>转 LeRobot</button>` : ""}${category === "lerobot" ? `<button class="button secondary compact-button" data-dataset-archive>生成训练包</button>` : ""}</div>`;
   card.querySelector("[data-dataset-detail]").addEventListener("click", () => showDatasetDetail(item.path));
   card.querySelector("[data-dataset-export]")?.addEventListener("click", () => exportEpisode(item));
   card.querySelector("[data-dataset-convert]")?.addEventListener("click", () => convertDataset(item));
@@ -369,7 +364,7 @@ async function refreshDatasets(showError = false) {
     renderDatasetList("episodeDatasetList", "episodeDatasetCount", data.episodes || [], "episodes");
     renderDatasetList("exportDatasetList", "exportDatasetCount", data.exports || [], "exports");
     state.lerobotItems = data.lerobot || []; renderDatasetList("lerobotDatasetList", "lerobotDatasetCount", state.lerobotItems, "lerobot");
-    renderDatasetArchives(data.archives || []);
+    renderDatasetWorkflow(data.episodes || [], data.exports || [], state.lerobotItems, data.archives || []);
   } catch (error) { badge($("datasetApiBadge"), false, "数据在线", "数据离线"); if (showError) toast(error.message, true); }
 }
 async function downloadDatasetArchive(name) {
@@ -386,37 +381,44 @@ async function downloadDatasetArchive(name) {
     URL.revokeObjectURL(url);
   } catch (error) { toast(error.message, true); }
 }
-function renderDatasetArchives(archives) {
-  const summary = $("lerobotExportSummary");
-  if (!archives.length) { summary.textContent = "选择 LeRobot 数据集后生成训练包并下载到 x86"; return; }
-  const latest = archives[0];
-  summary.innerHTML = `训练包已生成：${latest.name} · ${formatBytes(latest.bytes)} <button class="button ghost compact-button" data-download-archive>下载到 x86</button>`;
-  summary.querySelector("[data-download-archive]").addEventListener("click", () => downloadDatasetArchive(latest.name));
-}function updateDatasetSelectionSummary() {
-  const exportsCount = document.querySelectorAll("[data-dataset-select=exports]:checked").length;
-  const lerobotCount = document.querySelectorAll("[data-dataset-select=lerobot]:checked").length;
-  if ($("datasetSelectionSummary")) $("datasetSelectionSummary").textContent = exportsCount ? `已选择 ${exportsCount} 项中间数据` : "请在中间数据列表勾选来源";
-  if ($("lerobotExportSummary") && !document.querySelector("[data-download-archive]")) $("lerobotExportSummary").textContent = lerobotCount ? `已选择 ${lerobotCount} 个 LeRobot 数据集，可生成训练包` : "请先选择 LeRobot 数据集";
-}
-document.addEventListener("change", (event) => { if (event.target.matches?.("[data-dataset-select]")) updateDatasetSelectionSummary(); });
-function selectedExportPaths() {
-  return [...document.querySelectorAll("[data-dataset-select=exports]:checked")].map((input) => input.value);
-}
-function selectedLerobotPaths() {
-  return [...document.querySelectorAll("[data-dataset-select=lerobot]:checked")].map((input) => input.value);
-}
-async function convertSelectedDatasets() {
-  const datasets = selectedExportPaths();
-  const name = $("lerobotOutputName").value.trim();
-  if (!datasets.length) {toast("请先勾选至少一个中间数据", true); return;}
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{1,99}$/.test(name)) {toast("数据集名称只能使用字母、数字、点、下划线和短横线", true); return;}
-  try { await createJob("dataset.convert_lerobot", { datasets, output: `datasets/lerobot/${name}` }); toast("LeRobot 转换任务已提交"); await refreshDatasets(); } catch (error) {toast(error.message, true);}
+function renderDatasetWorkflow(episodes, exports, lerobot, archives) {
+  text("datasetFlowEpisodes", `${episodes.length} \u9879 ? ${episodes.length ? "\u53ef\u751f\u6210\u4e2d\u95f4\u6570\u636e" : "\u7b49\u5f85\u91c7\u96c6\u8bb0\u5f55"}`);
+  text("datasetFlowExports", `${exports.length} \u9879 ? ${exports.length ? "\u53ef\u8f6c\u6362\u4e3a LeRobot" : "\u7b49\u5f85\u751f\u6210\u4e2d\u95f4\u6570\u636e"}`);
+  text("datasetFlowLerobot", `${lerobot.length} \u9879 ? ${lerobot.length ? "\u53ef\u751f\u6210\u8bad\u7ec3\u5305" : "\u7b49\u5f85\u8f6c\u6362"}`);
+  text("datasetFlowArchive", `${archives.length} \u4e2a ? ${archives.length ? "\u5df2\u751f\u6210\uff0c\u53ef\u4e0b\u8f7d\u5230 x86" : "\u7b49\u5f85\u751f\u6210"}`);
+  const status = $("datasetWorkflowStatus");
+  if (!status) return;
+  const jobs = state.jobs || [];
+  const latest = (jobType) => jobs.filter((job) => job.job_type === jobType).sort((a, b) => String(b.created_at || b.createdAt || b.id).localeCompare(String(a.created_at || a.createdAt || a.id))).at(0);
+  const active = ["dataset.export_episode", "dataset.convert_lerobot", "dataset.archive_lerobot"].map(latest).find((job) => job && ["queued", "running"].includes(job.state));
+  const failed = ["dataset.export_episode", "dataset.convert_lerobot", "dataset.archive_lerobot"].map(latest).find((job) => job && job.state === "failed");
+  status.replaceChildren();
+  if (active) {
+    status.append(document.createTextNode(`\u6b63\u5728${active.job_type === "dataset.export_episode" ? "\u751f\u6210\u4e2d\u95f4\u6570\u636e" : active.job_type === "dataset.convert_lerobot" ? "\u8f6c\u6362 LeRobot \u6570\u636e\u96c6" : "\u751f\u6210\u8bad\u7ec3\u5305"} ? ${stateLabel(active.state)}`));
+    return;
+  }
+  if (failed) {
+    status.textContent = `\u6700\u8fd1\u4efb\u52a1\u5931\u8d25\uff1a${failed.job_type === "dataset.export_episode" ? "\u4e2d\u95f4\u6570\u636e\u751f\u6210" : failed.job_type === "dataset.convert_lerobot" ? "LeRobot \u8f6c\u6362" : "\u8bad\u7ec3\u5305\u751f\u6210"}\uff0c\u8bf7\u5230\u4efb\u52a1\u65e5\u5fd7\u67e5\u770b\u539f\u56e0\u3002`;
+    return;
+  }
+  if (archives.length) {
+    const latestArchive = archives[0];
+    status.append(document.createTextNode(`\u8bad\u7ec3\u5305\u5df2\u751f\u6210\uff1a${latestArchive.name} ? ${formatBytes(latestArchive.bytes)} `));
+    const button = document.createElement("button");
+    button.className = "button ghost compact-button";
+    button.textContent = "\u4e0b\u8f7d\u5230 x86";
+    button.addEventListener("click", () => downloadDatasetArchive(latestArchive.name));
+    status.append(button);
+    return;
+  }
+  if (lerobot.length) { status.textContent = "LeRobot \u6570\u636e\u96c6\u5df2\u5c31\u7eea\uff0c\u53ef\u5728\u53f3\u4fa7\u5361\u7247\u751f\u6210\u8bad\u7ec3\u5305\u3002"; return; }
+  if (exports.length) { status.textContent = "\u4e2d\u95f4\u6570\u636e\u5df2\u5c31\u7eea\uff0c\u53ef\u5728\u4e2d\u95f4\u6570\u636e\u5361\u7247\u8f6c\u6362\u4e3a LeRobot\u3002"; return; }
+  status.textContent = "\u8bf7\u4ece\u4e0b\u65b9\u539f\u59cb Episode \u5f00\u59cb\u751f\u6210\u4e2d\u95f4\u6570\u636e\u3002";
 }
 async function archiveLerobot(item) {
   if (!state.token) { openToken(); return; }
-  const selected = selectedLerobotPaths();
-  const datasets = selected.length ? selected : [item.path];
-  const name = datasets.length === 1 ? item.name : `lerobot-selection-${Date.now()}`;
+  const datasets = [item.path];
+  const name = item.name;
   try {
     await createJob("dataset.archive_lerobot", { datasets, output: `run/ops/exports/${name}.zip` });
     toast("训练包生成任务已提交");
