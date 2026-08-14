@@ -1,5 +1,5 @@
 ﻿const $ = (id) => document.getElementById(id);
-const state = { selectedLerobotPath: "", token: sessionStorage.getItem("vehicleOpsToken") || "", cameraSequence: 0, pipelineCameraSequence: 0, cameraStatus: null, pipelineCameraActive: false, selectedJobId: "", jobs: [], debugRunId: "", debugResult: null, debugImageUrls: {}, pipelineTrace: null, pipelineHistory: [], selectedPipelineStageId: "", selectedPipelineHistoryId: "", inspectorMode: "live", components: [], componentProfiles: [], selectedComponentId: "", storage: null, storageItems: [], selectedStorageCategory: "", systemMode: "", debugInputSource: "camera", debugUpload: null, observationWidth: 640, observationHeight: 480 };
+const state = { datasetCatalog: { episodes: [], exports: [], lerobot: [], archives: [] }, selectedLerobotPath: "", token: sessionStorage.getItem("vehicleOpsToken") || "", cameraSequence: 0, pipelineCameraSequence: 0, cameraStatus: null, pipelineCameraActive: false, selectedJobId: "", jobs: [], debugRunId: "", debugResult: null, debugImageUrls: {}, pipelineTrace: null, pipelineHistory: [], selectedPipelineStageId: "", selectedPipelineHistoryId: "", inspectorMode: "live", components: [], componentProfiles: [], selectedComponentId: "", storage: null, storageItems: [], selectedStorageCategory: "", systemMode: "", debugInputSource: "camera", debugUpload: null, observationWidth: 640, observationHeight: 480 };
 const text = (id, value) => { $(id).textContent = value ?? "—"; };
 const number = (value, digits = 1) => Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : "--";
 function setMetricTooltip(valueId, heading, rows) {
@@ -334,15 +334,22 @@ function formatBytes(value) {
   if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
   return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
 }
+async function runDatasetAction(button, busyLabel, action) {
+  if (!button || button.disabled) return;
+  const originalLabel = button.textContent;
+  button.disabled = true;
+  button.textContent = busyLabel;
+  try { await action(); } finally { button.disabled = false; button.textContent = originalLabel; }
+}
 function datasetCard(item, category) {
   const card = document.createElement("div");
   card.className = `dataset-item${item.protected ? " protected" : ""}`;
   const state = category === "lerobot" ? (item.training_ready ? "训练可用" : "需校验") : item.format;
   card.innerHTML = `<div class="dataset-item-main"><div><strong title="${item.name}">${item.name}</strong><small>${state} · ${formatBytes(item.bytes)} · ${item.frame_count || 0} 帧</small></div></div><div class="dataset-item-actions"><button class="button ghost compact-button" data-dataset-detail>详情</button>${category === "episodes" && !item.protected ? `<button class="button secondary compact-button" data-dataset-export>生成中间数据</button>` : ""}${category === "exports" ? `<button class="button secondary compact-button" data-dataset-convert>转 LeRobot</button>` : ""}${category === "lerobot" ? `<button class="button secondary compact-button" data-dataset-archive>生成训练包</button>` : ""}</div>`;
   card.querySelector("[data-dataset-detail]").addEventListener("click", () => showDatasetDetail(item.path));
-  card.querySelector("[data-dataset-export]")?.addEventListener("click", () => exportEpisode(item));
-  card.querySelector("[data-dataset-convert]")?.addEventListener("click", () => convertDataset(item));
-  card.querySelector("[data-dataset-archive]")?.addEventListener("click", () => archiveLerobot(item));
+  card.querySelector("[data-dataset-export]")?.addEventListener("click", (event) => runDatasetAction(event.currentTarget, "\u5904\u7406\u4e2d\u2026", () => exportEpisode(item)));
+  card.querySelector("[data-dataset-convert]")?.addEventListener("click", (event) => runDatasetAction(event.currentTarget, "\u8f6c\u6362\u4e2d\u2026", () => convertDataset(item)));
+  card.querySelector("[data-dataset-archive]")?.addEventListener("click", (event) => runDatasetAction(event.currentTarget, "\u751f\u6210\u4e2d\u2026", () => archiveLerobot(item)));
   return card;
 }
 function renderDatasetList(id, countId, items, category) {
@@ -364,6 +371,7 @@ async function refreshDatasets(showError = false) {
     renderDatasetList("episodeDatasetList", "episodeDatasetCount", data.episodes || [], "episodes");
     renderDatasetList("exportDatasetList", "exportDatasetCount", data.exports || [], "exports");
     state.lerobotItems = data.lerobot || []; renderDatasetList("lerobotDatasetList", "lerobotDatasetCount", state.lerobotItems, "lerobot");
+    state.datasetCatalog = { episodes: data.episodes || [], exports: data.exports || [], lerobot: state.lerobotItems, archives: data.archives || [] };
     renderDatasetWorkflow(data.episodes || [], data.exports || [], state.lerobotItems, data.archives || []);
   } catch (error) { badge($("datasetApiBadge"), false, "数据在线", "数据离线"); if (showError) toast(error.message, true); }
 }
@@ -381,15 +389,31 @@ async function downloadDatasetArchive(name) {
     URL.revokeObjectURL(url);
   } catch (error) { toast(error.message, true); }
 }
+function latestDatasetJob(jobType) {
+  return (state.jobs || []).filter((job) => job.job_type === jobType).sort((a, b) => String(b.requested_at || b.created_at || b.id).localeCompare(String(a.requested_at || a.created_at || a.id))).at(0);
+}
+function datasetJobSuffix(job) {
+  if (!job) return "";
+  return ` ? ${stateLabel(job.state)}`;
+}
 function renderDatasetWorkflow(episodes, exports, lerobot, archives) {
-  text("datasetFlowEpisodes", `${episodes.length} \u9879 ? ${episodes.length ? "\u53ef\u751f\u6210\u4e2d\u95f4\u6570\u636e" : "\u7b49\u5f85\u91c7\u96c6\u8bb0\u5f55"}`);
-  text("datasetFlowExports", `${exports.length} \u9879 ? ${exports.length ? "\u53ef\u8f6c\u6362\u4e3a LeRobot" : "\u7b49\u5f85\u751f\u6210\u4e2d\u95f4\u6570\u636e"}`);
-  text("datasetFlowLerobot", `${lerobot.length} \u9879 ? ${lerobot.length ? "\u53ef\u751f\u6210\u8bad\u7ec3\u5305" : "\u7b49\u5f85\u8f6c\u6362"}`);
-  text("datasetFlowArchive", `${archives.length} \u4e2a ? ${archives.length ? "\u5df2\u751f\u6210\uff0c\u53ef\u4e0b\u8f7d\u5230 x86" : "\u7b49\u5f85\u751f\u6210"}`);
+  const stageJobs = { episodes: latestDatasetJob("dataset.export_episode"), exports: latestDatasetJob("dataset.export_episode"), lerobot: latestDatasetJob("dataset.convert_lerobot"), archive: latestDatasetJob("dataset.archive_lerobot") };
+  ["episodes", "exports", "lerobot", "archive"].forEach((stage) => { const node = document.querySelector(`[data-flow-stage="${stage}"]`); if (node) node.classList.remove("active", "success", "failed"); });
+  text("datasetFlowEpisodes", `${episodes.length} \u9879 ? ${episodes.length ? "\u53ef\u751f\u6210\u4e2d\u95f4\u6570\u636e" : "\u7b49\u5f85\u91c7\u96c6\u8bb0\u5f55"}${datasetJobSuffix(stageJobs.episodes)}`);
+  text("datasetFlowExports", `${exports.length} \u9879 ? ${exports.length ? "\u53ef\u8f6c\u6362\u4e3a LeRobot" : "\u7b49\u5f85\u751f\u6210\u4e2d\u95f4\u6570\u636e"}${datasetJobSuffix(stageJobs.exports)}`);
+  text("datasetFlowLerobot", `${lerobot.length} \u9879 ? ${lerobot.length ? "\u53ef\u751f\u6210\u8bad\u7ec3\u5305" : "\u7b49\u5f85\u8f6c\u6362"}${datasetJobSuffix(stageJobs.lerobot)}`);
+  text("datasetFlowArchive", `${archives.length} \u4e2a ? ${archives.length ? "\u5df2\u751f\u6210\uff0c\u53ef\u4e0b\u8f7d\u5230 x86" : "\u7b49\u5f85\u751f\u6210"}${datasetJobSuffix(stageJobs.archive)}`);
+  Object.entries(stageJobs).forEach(([stage, job]) => {
+    const node = document.querySelector(`[data-flow-stage="${stage}"]`);
+    if (!node || !job) return;
+    if (["queued", "running"].includes(job.state)) node.classList.add("active");
+    else if (job.state === "succeeded") node.classList.add("success");
+    else if (["failed", "cancelled"].includes(job.state)) node.classList.add("failed");
+  });
   const status = $("datasetWorkflowStatus");
   if (!status) return;
   const jobs = state.jobs || [];
-  const latest = (jobType) => jobs.filter((job) => job.job_type === jobType).sort((a, b) => String(b.created_at || b.createdAt || b.id).localeCompare(String(a.created_at || a.createdAt || a.id))).at(0);
+  const latest = latestDatasetJob;
   const active = ["dataset.export_episode", "dataset.convert_lerobot", "dataset.archive_lerobot"].map(latest).find((job) => job && ["queued", "running"].includes(job.state));
   const failed = ["dataset.export_episode", "dataset.convert_lerobot", "dataset.archive_lerobot"].map(latest).find((job) => job && job.state === "failed");
   status.replaceChildren();
@@ -439,6 +463,8 @@ async function convertDataset(item) {
   try {
     const result = await jobFetch("/api/jobs");
     state.jobs = result.jobs || [];
+    const catalog = state.datasetCatalog || { episodes: [], exports: [], lerobot: [], archives: [] };
+    renderDatasetWorkflow(catalog.episodes, catalog.exports, catalog.lerobot, catalog.archives);
     $("jobApiBadge").className = "pill success";
     $("jobApiBadge").innerHTML = "<i></i>JOB API ONLINE";
     renderJobList();
