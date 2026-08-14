@@ -394,7 +394,7 @@ function latestDatasetJob(jobType) {
 }
 function datasetJobSuffix(job) {
   if (!job) return "";
-  return ` ? ${stateLabel(job.state)}`;
+  return `\u00b7 ${stateLabel(job.state)}`;
 }
 async function refreshDatasetFailureLog() {
   const types = ["dataset.export_episode", "dataset.convert_lerobot", "dataset.archive_lerobot"];
@@ -428,7 +428,7 @@ function renderDatasetWorkflow(episodes, exports, lerobot, archives) {
   status.replaceChildren();
   status.classList.remove("error");
   if (active) {
-    status.append(document.createTextNode(`\u6b63\u5728${active.job_type === "dataset.export_episode" ? "\u751f\u6210\u4e2d\u95f4\u6570\u636e" : active.job_type === "dataset.convert_lerobot" ? "\u8f6c\u6362 LeRobot \u6570\u636e\u96c6" : "\u751f\u6210\u8bad\u7ec3\u5305"} ? ${stateLabel(active.state)}`));
+    status.append(document.createTextNode(`\u6b63\u5728${active.job_type === "dataset.export_episode" ? "\u751f\u6210\u4e2d\u95f4\u6570\u636e" : active.job_type === "dataset.convert_lerobot" ? "\u8f6c\u6362 LeRobot \u6570\u636e\u96c6" : "\u751f\u6210\u8bad\u7ec3\u5305"} · ${stateLabel(active.state)}}`));
     return;
   }
   if (failed) {
@@ -443,7 +443,7 @@ function renderDatasetWorkflow(episodes, exports, lerobot, archives) {
   }
   if (archives.length) {
     const latestArchive = archives[0];
-    status.append(document.createTextNode(`\u8bad\u7ec3\u5305\u5df2\u751f\u6210\uff1a${latestArchive.name} ? ${formatBytes(latestArchive.bytes)} `));
+    status.append(document.createTextNode(`\u8bad\u7ec3\u5305\u5df2\u751f\u6210\uff1a${latestArchive.name} · ${formatBytes(latestArchive.bytes)} `));
     const button = document.createElement("button");
     button.className = "button ghost compact-button";
     button.textContent = "\u4e0b\u8f7d\u5230 x86";
