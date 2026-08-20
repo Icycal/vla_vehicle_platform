@@ -174,17 +174,22 @@ public:
     // clear the picture
     memset(dest, 0, m_avframe_device_size);
 
+    av_packet_unref(m_avpacket);
+
     #if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(58, 133, 100)
     // deprecated: https://github.com/FFmpeg/FFmpeg/commit/f7db77bd8785d1715d3e7ed7e69bd1cc991f2d07
     av_init_packet(m_avpacket);
+    m_avpacket->data = reinterpret_cast<uint8_t *>(const_cast<char *>(src));
+    m_avpacket->size = bytes_used;
     #else
-    av_new_packet(m_avpacket, bytes_used);
+    m_result = av_new_packet(m_avpacket, bytes_used);
+    if (m_result < 0) {
+      std::cerr << "Failed to allocate AVPacket: ";
+      print_av_error_string(m_result);
+      return;
+    }
+    memcpy(m_avpacket->data, src, static_cast<size_t>(bytes_used));
     #endif
-
-    av_packet_from_data(
-      m_avpacket,
-      const_cast<uint8_t *>(reinterpret_cast<const uint8_t *>(src)),
-      bytes_used);
 
     // Pass src MJPEG image to decoder
     m_result = avcodec_send_packet(m_avcodec_context, m_avpacket);
