@@ -52,6 +52,7 @@ main{width:min(1340px,93vw);margin:auto;padding:20px 0 24px}
 @keyframes view-in{from{opacity:.2;transform:translateY(4px)}
 }
 .panel{border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);box-shadow:var(--shadow)}
+.monitor-action-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:14px}
 .monitor-grid{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(310px,.65fr);gap:14px}
 .camera-card,.live-summary,.control-card,.action-card,.pipeline,.tools-help{padding:20px}
 .section-heading{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px}
@@ -92,7 +93,7 @@ main{width:min(1340px,93vw);margin:auto;padding:20px 0 24px}
 .shadow-grid small{display:block;color:var(--muted);font-size:8px;text-transform:uppercase}
 .shadow-grid strong{display:block;font-size:16px;margin-top:5px}
 .summary-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:auto;padding-top:14px}
-.capture-grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(340px,.85fr);gap:14px;margin-bottom:18px}
+.capture-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:14px;margin-bottom:18px}
 .capture-side{display:grid;gap:14px}
 .stack-form,label{display:grid;gap:6px}
 label{color:var(--muted);font-size:10px;margin-bottom:11px}
@@ -142,7 +143,7 @@ footer{width:min(1340px,93vw);margin:auto;padding:8px 0 25px;display:flex;justif
 .top-actions{justify-self:end}
 .overview{grid-template-columns:minmax(0,1fr) minmax(280px,360px)}
 .metrics-grid{grid-template-columns:1fr 1fr}
-.monitor-grid,.capture-grid,.tools-grid{grid-template-columns:1fr}
+.monitor-grid,.monitor-action-grid,.capture-grid,.tools-grid{grid-template-columns:1fr}
 .live-summary{min-height:390px}
 .pipeline-form{grid-template-columns:1fr 1fr}
 .pipeline-form label:last-child{grid-column:1/-1}
