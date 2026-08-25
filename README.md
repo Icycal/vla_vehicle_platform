@@ -1,4 +1,6 @@
-# VLA Vehicle Platform
+# 赤兔（Chitu）Vehicle Intelligence Platform
+
+<p align="center"><img src="docs/assets/chitu-logo-preview.png" alt="赤兔 Chitu" width="640"></p>
 
 Greenfield ROS 2 Humble platform for the Jetson Orin NX Ackermann vehicle. Project-owned ROS nodes
 use C++17, `rclcpp`, and `ament_cmake`. Legacy workspaces remain read-only references.

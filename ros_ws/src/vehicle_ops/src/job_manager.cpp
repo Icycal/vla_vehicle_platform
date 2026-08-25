@@ -14,6 +14,7 @@
 #include <ctime>
 #include <fstream>
 #include <iomanip>
+#include <regex>
 #include <sstream>
 #include <stdexcept>
 #include <vector>
@@ -78,6 +79,15 @@ std::string required_string(const Json & object, const char * key)
   }
   const auto value = object.at(key).get<std::string>();
   if (value.empty()) {throw std::invalid_argument(std::string("Parameter '") + key + "' is required");}
+  return value;
+}
+
+std::string checked_value(const Json & object, const char * key, const std::regex & pattern)
+{
+  const auto value = required_string(object, key);
+  if (!std::regex_match(value, pattern)) {
+    throw std::invalid_argument(std::string("Parameter '") + key + "' has an invalid format");
+  }
   return value;
 }
 }  // namespace
@@ -226,6 +236,37 @@ std::string JobManager::create(const std::string & request_body)
       throw std::invalid_argument("policy.runtime_switch only accepts the provider parameter");
     }
     job->command = {(scripts / "switch_policy_runtime.sh").string(), provider};
+  } else if (type == "policy.model_install") {
+    static const std::regex provider_pattern("[a-z][a-z0-9_-]{1,31}");
+    static const std::regex version_pattern("[A-Za-z0-9][A-Za-z0-9._-]{0,79}");
+    static const std::regex model_pattern("[A-Za-z0-9._-]+/[A-Za-z0-9._-]+");
+    static const std::regex revision_pattern("[A-Za-z0-9._/-]{1,120}");
+    static const std::regex dataset_pattern("[A-Za-z0-9._/-]{0,160}");
+    const auto provider = checked_value(parameters, "provider", provider_pattern);
+    if (provider != "smolvla") {throw std::invalid_argument("Model provider is not registered");}
+    const auto version = checked_value(parameters, "version", version_pattern);
+    const auto model_id = checked_value(parameters, "model_id", model_pattern);
+    const auto revision = checked_value(parameters, "revision", revision_pattern);
+    const auto dataset_id = parameters.value("dataset_id", std::string{});
+    if (!std::regex_match(dataset_id, dataset_pattern)) {
+      throw std::invalid_argument("Parameter 'dataset_id' has an invalid format");
+    }
+    if (parameters.size() < 4 || parameters.size() > 5) {
+      throw std::invalid_argument(
+              "policy.model_install accepts provider, version, model_id, revision and optional dataset_id");
+    }
+    job->command = {(scripts / "install_policy_model.sh").string(),
+      provider, version, model_id, revision, dataset_id};
+  } else if (type == "policy.model_activate") {
+    static const std::regex provider_pattern("[a-z][a-z0-9_-]{1,31}");
+    static const std::regex version_pattern("[A-Za-z0-9][A-Za-z0-9._-]{0,79}");
+    if (parameters.size() != 2) {
+      throw std::invalid_argument("policy.model_activate only accepts provider and version");
+    }
+    const auto provider = checked_value(parameters, "provider", provider_pattern);
+    if (provider != "smolvla") {throw std::invalid_argument("Model provider is not registered");}
+    job->command = {(scripts / "activate_policy_model.sh").string(), provider,
+      checked_value(parameters, "version", version_pattern)};
   } else {
     throw std::invalid_argument("Unsupported job_type");
   }
@@ -350,8 +391,8 @@ std::optional<std::string> JobManager::cancel(const std::string & job_id)
   if (job->state != "running" && job->state != "queued") {
     throw std::runtime_error("Job is no longer running");
   }
-  if (job->type == "policy.runtime_switch") {
-    throw std::runtime_error("Policy Runtime switch jobs cannot be cancelled");
+  if (job->type == "policy.runtime_switch" || job->type == "policy.model_activate") {
+    throw std::runtime_error("Policy Runtime switch and model activation jobs cannot be cancelled");
   }
   job->cancel_requested = true;
   job->cancellation_reason = "Cancelled by Vehicle Ops operator";

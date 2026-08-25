@@ -138,6 +138,16 @@ std::string json_string(const std::string & value) {return "\"" + json_escape(va
   }
   return output;
 }
+std::string utc_timestamp()
+{
+  const auto now = std::chrono::system_clock::now();
+  const auto time = std::chrono::system_clock::to_time_t(now);
+  std::tm value{};
+  gmtime_r(&time, &value);
+  std::ostringstream output;
+  output << std::put_time(&value, "%Y-%m-%dT%H:%M:%SZ");
+  return output.str();
+}
 std::string file_time_string(const std::filesystem::path & path)
 {
   try { return std::to_string(std::chrono::duration_cast<std::chrono::seconds>(std::filesystem::last_write_time(path).time_since_epoch()).count()); }
@@ -423,6 +433,8 @@ private:
   HttpResponse dataset_catalog();
   HttpResponse dataset_detail(const std::string & relative_path);
   HttpResponse dataset_download(const std::string & archive_name);
+  HttpResponse dataset_review(const std::string & body);
+  HttpResponse models_catalog();
   HttpResponse task(const std::string & body);
   HttpResponse start_episode(const std::string & body);
   HttpResponse stop_episode();
@@ -755,6 +767,11 @@ HttpResponse VehicleOpsApi::route(const HttpRequest & request)
     const auto denied = authorize(request); if (denied) {return *denied;}
     return dataset_download(url_decode(path.substr(std::string("/api/datasets/download/").size())));
   }
+  if (request.method == "POST" && path == "/api/datasets/review") {
+    const auto denied = authorize(request); if (denied) {return *denied;}
+    return dataset_review(request.body);
+  }
+  if (request.method == "GET" && path == "/api/models") {return models_catalog();}
   if (request.method == "GET" && path.rfind("/api/storage/items/", 0) == 0) {
     const auto denied = authorize(request);
     if (denied) {return *denied;}
@@ -832,10 +849,16 @@ HttpResponse VehicleOpsApi::static_file(const std::string & path) const
 {
   std::filesystem::path relative;
   if (path == "/" || path == "/index.html") {relative = "index.html";}
-  else if (path == "/assets/app.css") {relative = "assets/app.css";}
-  else if (path == "/assets/app.js") {relative = "assets/app.js";}
   else if (path == "/favicon.svg") {relative = "favicon.svg";}
-  else {return error(404, "Resource not found");}
+  else if (path.rfind("/assets/", 0) == 0 && path.size() <= 180 &&
+    path.find("..") == std::string::npos && path.find('\\') == std::string::npos)
+  {
+    relative = path.substr(1);
+    const auto extension = lowercase(relative.extension().string());
+    if (extension != ".css" && extension != ".js" && extension != ".svg" &&
+      extension != ".png" && extension != ".webp")
+    {return error(404, "Resource not found");}
+  } else {return error(404, "Resource not found");}
   try {
     const auto file = std::filesystem::path(web_root_) / relative;
     return {200, content_type_for(file), read_file(file), {{"Cache-Control", "no-cache"}}};
@@ -1120,6 +1143,35 @@ HttpResponse VehicleOpsApi::dataset_detail(const std::string & relative_path)
   for (const auto & entry : fs::recursive_directory_iterator(path, fs::directory_options::skip_permission_denied)) {
     if (entry.is_regular_file()) {result["files"].push_back({{"path", fs::relative(entry.path(), path).generic_string()}, {"bytes", entry.file_size()}});}
   }
+  std::string review_key = relative_path;
+  std::replace(review_key.begin(), review_key.end(), '/', '_');
+  const auto review_path = fs::path(project_root_) / "run/ops/dataset-reviews" / (review_key + ".json");
+  if (fs::exists(review_path)) {
+    try {result["review"] = nlohmann::json::parse(std::ifstream(review_path));}
+    catch (...) {result["review_error"] = true;}
+  }
+  const auto quality_root = fs::path(project_root_) / "run/test/dataset-quality";
+  fs::path latest_report;
+  fs::file_time_type latest_time{};
+  if (fs::is_directory(quality_root)) {
+    for (const auto & entry : fs::recursive_directory_iterator(quality_root, fs::directory_options::skip_permission_denied)) {
+      if (!entry.is_regular_file() || entry.path().filename() != "vehicle_ops_source.json") {continue;}
+      try {
+        const auto source = nlohmann::json::parse(std::ifstream(entry.path()));
+        std::error_code source_error;
+        const auto source_path = fs::weakly_canonical(source.value("dataset_path", ""), source_error);
+        const auto report_path = entry.path().parent_path() / "dataset_quality_report.json";
+        if (!source_error && source_path == path && fs::is_regular_file(report_path)) {
+          const auto modified = fs::last_write_time(report_path);
+          if (latest_report.empty() || modified > latest_time) {latest_report = report_path; latest_time = modified;}
+        }
+      } catch (...) {}
+    }
+  }
+  if (!latest_report.empty()) {
+    try {result["quality_report"] = nlohmann::json::parse(std::ifstream(latest_report));}
+    catch (...) {result["quality_report_error"] = true;}
+  }
   return {200, "application/json; charset=utf-8", result.dump() + "\n", {{"Cache-Control", "no-store"}}};
 }
 HttpResponse VehicleOpsApi::dataset_download(const std::string & archive_name)
@@ -1134,6 +1186,97 @@ HttpResponse VehicleOpsApi::dataset_download(const std::string & archive_name)
   if (fs::file_size(archive) > 512ULL * 1024ULL * 1024ULL) {return error(413, "Export archive is too large for the current download endpoint");}
   return {200, "application/zip", read_file(archive), {{"Content-Disposition", "attachment; filename=\"" + archive.filename().string() + "\""}, {"Cache-Control", "no-store"}}};
 }
+HttpResponse VehicleOpsApi::dataset_review(const std::string & body)
+{
+  namespace fs = std::filesystem;
+  const auto input = nlohmann::json::parse(body, nullptr, false);
+  if (input.is_discarded() || !input.is_object()) {return error(400, "Request body must be valid JSON");}
+  const auto relative_path = input.value("path", std::string{});
+  const auto status = input.value("status", std::string{});
+  const auto note = input.value("note", std::string{});
+  if (relative_path.empty() || relative_path.find("..") != std::string::npos ||
+    relative_path.find('\\') != std::string::npos)
+  {return error(400, "Invalid dataset path");}
+  if (status != "pending" && status != "accepted" && status != "rejected") {
+    return error(400, "Review status must be pending, accepted or rejected");
+  }
+  if (note.size() > 2000) {return error(400, "Review note is too long");}
+  const auto dataset_root = fs::weakly_canonical(fs::path(project_root_) / "datasets");
+  const auto dataset_path = fs::weakly_canonical(fs::path(project_root_) / relative_path);
+  if (!fs::is_directory(dataset_path) ||
+    dataset_path.string().rfind((dataset_root / "").string(), 0) != 0)
+  {return error(404, "Dataset not found under datasets/");}
+  nlohmann::json excluded_frames = input.value("excluded_frames", nlohmann::json::array());
+  if (!excluded_frames.is_array() || excluded_frames.size() > 10000) {
+    return error(400, "excluded_frames must be an array with at most 10000 items");
+  }
+  for (const auto & frame : excluded_frames) {
+    if (!frame.is_number_unsigned() && !(frame.is_number_integer() && frame.get<long long>() >= 0)) {
+      return error(400, "excluded_frames must contain non-negative frame indexes");
+    }
+  }
+  std::string key = relative_path;
+  std::replace(key.begin(), key.end(), '/', '_');
+  const auto review_root = fs::path(project_root_) / "run/ops/dataset-reviews";
+  fs::create_directories(review_root);
+  const auto review_path = review_root / (key + ".json");
+  const nlohmann::json review{{"schema_version", "vehicle.dataset.review.v1"},
+    {"path", relative_path}, {"status", status}, {"note", note},
+    {"excluded_frames", excluded_frames}, {"updated_at", utc_timestamp()}};
+  const auto temporary = review_path.string() + ".partial";
+  {std::ofstream stream(temporary); stream << review.dump(2) << '\n';}
+  fs::rename(temporary, review_path);
+  return {200, "application/json; charset=utf-8", review.dump() + "\n", {{"Cache-Control", "no-store"}}};
+}
+
+HttpResponse VehicleOpsApi::models_catalog()
+{
+  namespace fs = std::filesystem;
+  nlohmann::json result{{"schema_version", "vehicle.ops.model-catalog.v1"},
+    {"providers", nlohmann::json::array({{{"provider_id", "smolvla"},
+      {"display_name", "SmolVLA"}, {"install_supported", true}, {"activate_supported", true}}})},
+    {"models", nlohmann::json::array()}};
+  fs::path active_root;
+  std::string active_model_id;
+  std::ifstream environment(fs::path(project_root_) / "run/config/smolvla-runtime.env");
+  for (std::string line; std::getline(environment, line);) {
+    if (line.rfind("SMOLVLA_MODEL_ROOT=", 0) == 0) {active_root = line.substr(19);}
+    if (line.rfind("SMOLVLA_MODEL_ID=", 0) == 0) {active_model_id = line.substr(17);}
+  }
+  if (active_root.empty()) {active_root = fs::path(project_root_) / "run/models/smolvla_base";}
+  std::error_code active_error;
+  active_root = fs::weakly_canonical(active_root, active_error);
+  const auto append_model = [&](const fs::path & model_path, const std::string & provider,
+    const std::string & version, bool activatable) {
+    if (!fs::is_directory(model_path)) {return;}
+    std::uint64_t files = 0;
+    nlohmann::json item{{"provider", provider}, {"version", version}, {"path", model_path.string()},
+      {"bytes", directory_bytes(model_path, files)}, {"file_count", files},
+      {"modified_at", file_time_string(model_path)}, {"activatable", activatable},
+      {"valid", fs::exists(model_path / "config.json") && fs::exists(model_path / "model.safetensors") &&
+        fs::exists(model_path / "policy_preprocessor.json") && fs::exists(model_path / "policy_postprocessor.json")}};
+    std::error_code model_error;
+    item["active"] = fs::weakly_canonical(model_path, model_error) == active_root;
+    const auto manifest_path = model_path / "vehicle_model_manifest.json";
+    if (fs::exists(manifest_path)) {
+      try {item["manifest"] = nlohmann::json::parse(std::ifstream(manifest_path));}
+      catch (...) {item["manifest_error"] = true;}
+    }
+    result["models"].push_back(item);
+  };
+  append_model(fs::path(project_root_) / "run/models/smolvla_base", "smolvla", "legacy-base", false);
+  const auto registry = fs::path(project_root_) / "run/models/providers/smolvla";
+  if (fs::is_directory(registry)) {
+    for (const auto & entry : fs::directory_iterator(registry, fs::directory_options::skip_permission_denied)) {
+      if (entry.is_directory() && entry.path().extension() != ".partial") {
+        append_model(entry.path(), "smolvla", entry.path().filename().string(), true);
+      }
+    }
+  }
+  result["active_model_id"] = active_model_id;
+  return {200, "application/json; charset=utf-8", result.dump() + "\n", {{"Cache-Control", "no-store"}}};
+}
+
 HttpResponse VehicleOpsApi::storage_status()
 {
   if (!storage_status_client_->wait_for_service(250ms)) {return error(503, "Storage Manager is unavailable");}
@@ -1376,22 +1519,23 @@ HttpResponse VehicleOpsApi::jobs_create(const std::string & body)
   try {
     const auto input = nlohmann::json::parse(body, nullptr, false);
     if (input.is_discarded()) {throw std::invalid_argument("Request body must be valid JSON");}
-    if (input.value("job_type", "") == "policy.runtime_switch") {
+    const auto job_type = input.value("job_type", "");
+    if (job_type == "policy.runtime_switch" || job_type == "policy.model_activate") {
       std::lock_guard<std::mutex> lock(mutex_);
       const auto now = std::chrono::steady_clock::now();
       const auto system_age = age(system_, now);
       if (!system_.message || !fresh(system_age) ||
         system_.message->mode != vehicle_interfaces::msg::SystemState::MODE_VLA_SHADOW)
       {
-        return error(409, "Policy Runtime can only be switched while the vehicle is in VLA_SHADOW mode");
+        return error(409, "Policy Runtime changes require VLA_SHADOW mode");
       }
       if (active_debug_.status == "RUNNING" || active_debug_.status == "PAUSED") {
-        return error(409, "Stop the active debug session before switching Policy Runtime");
+        return error(409, "Stop the active debug session before changing Policy Runtime");
       }
       if (episode_.message &&
         episode_.message->state == vehicle_interfaces::msg::EpisodeState::STATE_RECORDING)
       {
-        return error(409, "Stop episode recording before switching Policy Runtime");
+        return error(409, "Stop episode recording before changing Policy Runtime");
       }
       const bool command_recent = command_received_.time_since_epoch().count() != 0 &&
         std::chrono::duration<double>(now - command_received_).count() <= command_timeout_seconds_;

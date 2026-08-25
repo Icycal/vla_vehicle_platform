@@ -35,3 +35,14 @@ docker run --rm \
     --dataset /dataset \
     --output "/output/${OUTPUT_NAME}" \
     "$@"
+python3 - "${OUTPUT_PATH}/vehicle_ops_source.json" "${DATASET_PATH}" <<'PY'
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+Path(sys.argv[1]).write_text(json.dumps({
+    "schema_version": "vehicle.ops.quality-source.v1",
+    "dataset_path": sys.argv[2],
+    "generated_at": datetime.now(timezone.utc).isoformat(),
+}, indent=2) + "\n", encoding="utf-8")
+PY

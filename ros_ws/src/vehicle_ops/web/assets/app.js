@@ -1,4 +1,4 @@
-﻿const $ = (id) => document.getElementById(id);
+const $ = (id) => document.getElementById(id);
 const state = { datasetCatalog: { episodes: [], exports: [], lerobot: [], archives: [] }, datasetFailureLogJobId: "", datasetFailureLog: "", selectedLerobotPath: "", token: sessionStorage.getItem("vehicleOpsToken") || "", cameraSequence: 0, pipelineCameraSequence: 0, cameraStatus: null, pipelineCameraActive: false, selectedJobId: "", jobs: [], debugRunId: "", debugResult: null, debugImageUrls: {}, pipelineTrace: null, pipelineHistory: [], selectedPipelineStageId: "", selectedPipelineHistoryId: "", inspectorMode: "live", components: [], componentProfiles: [], selectedComponentId: "", storage: null, storageItems: [], selectedStorageCategory: "", systemMode: "", policyStatus: null, systemStatus: null, runtimeSwitchJobId: "", runtimeSwitchTarget: "", runtimeSwitchNotified: false, debugInputSource: "camera", debugUpload: null, observationWidth: 640, observationHeight: 480 };
 const text = (id, value) => { $(id).textContent = value ?? "—"; };
 const number = (value, digits = 1) => Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : "--";
@@ -384,28 +384,66 @@ async function runDatasetAction(button, busyLabel, action) {
   button.textContent = busyLabel;
   try { await action(); } finally { button.disabled = false; button.textContent = originalLabel; }
 }
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (character) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"})[character]);
+}
 function datasetCard(item, category) {
   const card = document.createElement("div");
   card.className = `dataset-item${item.protected ? " protected" : ""}`;
-  const state = category === "lerobot" ? (item.training_ready ? "训练可用" : "需校验") : item.format;
-  card.innerHTML = `<div class="dataset-item-main"><div><strong title="${item.name}">${item.name}</strong><small>${state} · ${formatBytes(item.bytes)} · ${item.frame_count || 0} 帧</small></div></div><div class="dataset-item-actions"><button class="button ghost compact-button" data-dataset-detail>详情</button>${category === "episodes" && !item.protected ? `<button class="button secondary compact-button" data-dataset-export>生成中间数据</button>` : ""}${category === "exports" ? `<button class="button secondary compact-button" data-dataset-convert>转 LeRobot</button>` : ""}${category === "lerobot" ? `<button class="button secondary compact-button" data-dataset-archive>生成训练包</button>` : ""}</div>`;
+  const datasetState = category === "lerobot" ? (item.training_ready ? "\u8bad\u7ec3\u53ef\u7528" : "\u9700\u6821\u9a8c") : item.format;
+  const qualityButton = category === "exports" || category === "lerobot" ? '<button class="button ghost compact-button" data-dataset-quality>\u8d28\u91cf\u68c0\u67e5</button>' : "";
+  card.innerHTML = `<div class="dataset-item-main"><div><strong title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</strong><small>${escapeHtml(datasetState)} \u00b7 ${formatBytes(item.bytes)} \u00b7 ${item.frame_count || 0} \u5e27</small></div></div><div class="dataset-item-actions"><button class="button ghost compact-button" data-dataset-detail>\u8be6\u60c5/\u7b5b\u9009</button>${qualityButton}${category === "episodes" && !item.protected ? '<button class="button secondary compact-button" data-dataset-export>\u751f\u6210\u4e2d\u95f4\u6570\u636e</button>' : ""}${category === "exports" ? '<button class="button secondary compact-button" data-dataset-convert>\u8f6c LeRobot</button>' : ""}${category === "lerobot" ? '<button class="button secondary compact-button" data-dataset-archive>\u751f\u6210\u8bad\u7ec3\u5305</button>' : ""}</div>`;
   card.querySelector("[data-dataset-detail]").addEventListener("click", () => showDatasetDetail(item.path));
+  card.querySelector("[data-dataset-quality]")?.addEventListener("click", (event) => runDatasetAction(event.currentTarget, "\u68c0\u67e5\u4e2d\u2026", () => inspectDataset(item)));
   card.querySelector("[data-dataset-export]")?.addEventListener("click", (event) => runDatasetAction(event.currentTarget, "\u5904\u7406\u4e2d\u2026", () => exportEpisode(item)));
   card.querySelector("[data-dataset-convert]")?.addEventListener("click", (event) => runDatasetAction(event.currentTarget, "\u8f6c\u6362\u4e2d\u2026", () => convertDataset(item)));
   card.querySelector("[data-dataset-archive]")?.addEventListener("click", (event) => runDatasetAction(event.currentTarget, "\u751f\u6210\u4e2d\u2026", () => archiveLerobot(item)));
   return card;
 }
 function renderDatasetList(id, countId, items, category) {
-  const list = $(id); list.replaceChildren(); text(countId, `${items.length} 项`);
-  if (!items.length) { list.innerHTML = `<div class="job-empty"><strong>暂无记录</strong><span>完成采集或转换后会显示在这里</span></div>`; return; }
+  const list = $(id); list.replaceChildren(); text(countId, `${items.length} \u9879`);
+  if (!items.length) { list.innerHTML = `<div class="job-empty"><strong>\u6682\u65e0\u8bb0\u5f55</strong><span>\u5b8c\u6210\u91c7\u96c6\u6216\u8f6c\u6362\u540e\u4f1a\u663e\u793a\u5728\u8fd9\u91cc</span></div>`; return; }
   items.forEach((item) => list.appendChild(datasetCard(item, category)));
+}
+function parseFrameIndexes(value) {
+  const indexes = new Set();
+  for (const part of value.split(",").map((item) => item.trim()).filter(Boolean)) {
+    const match = part.match(/^(\d+)(?:-(\d+))?$/);
+    if (!match) throw new Error(`\u65e0\u6548\u5e27\u683c\u5f0f\uff1a${part}`);
+    const startIndex = Number(match[1]);
+    const endIndex = Number(match[2] ?? match[1]);
+    if (endIndex < startIndex || endIndex - startIndex > 5000) throw new Error(`\u65e0\u6548\u5e27\u8303\u56f4\uff1a${part}`);
+    for (let index = startIndex; index <= endIndex; index += 1) indexes.add(index);
+  }
+  if (indexes.size > 10000) throw new Error("\u65e0\u6548\u5e27\u6570\u91cf\u4e0d\u80fd\u8d85\u8fc7 10000");
+  return [...indexes].sort((left, right) => left - right);
+}
+async function saveDatasetReview(path) {
+  if (!state.token) { openToken(); throw new Error("\u8bf7\u5148\u586b\u5199\u64cd\u4f5c\u4ee4\u724c"); }
+  const result = await jobFetch("/api/datasets/review", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({path, status: $("datasetReviewStatus").value, note: $("datasetReviewNote").value.trim(), excluded_frames: parseFrameIndexes($("datasetReviewFrames").value)})
+  });
+  toast("\u4eba\u5de5\u7b5b\u9009\u7ed3\u679c\u5df2\u4fdd\u5b58");
+  await showDatasetDetail(result.path);
 }
 async function showDatasetDetail(path) {
   try {
     const detail = await fetch(`/api/datasets/detail/${encodeURIComponent(path)}`, { cache: "no-store" }).then(async (response) => { const data = await response.json(); if (!response.ok) throw new Error(data.message || `HTTP ${response.status}`); return data; });
     const files = (detail.files || []).slice(0, 8).map((file) => `${file.path} (${formatBytes(file.bytes)})`).join("\n");
-    $("datasetDetail").innerHTML = `<strong>${detail.name}</strong><span>${detail.path} · ${formatBytes(detail.bytes)} · ${detail.file_count} 个文件</span><pre>${files || "目录为空"}</pre>`;
+    const report = detail.quality_report;
+    const counts = report?.issue_counts || {};
+    const reportHtml = report ? `<div class="quality-summary ${report.training_readiness ? "ready" : "blocked"}"><strong>${report.training_readiness ? "\u8d28\u91cf\u68c0\u67e5\u901a\u8fc7" : "\u8d28\u91cf\u68c0\u67e5\u672a\u901a\u8fc7"}</strong><span>${report.frame_count || 0} \u5e27 \u00b7 blocker ${counts.blocker || 0} \u00b7 error ${counts.error || 0} \u00b7 warning ${counts.warning || 0}</span><ul>${(report.issues || []).slice(0, 6).map((issue) => `<li><b>${escapeHtml(issue.severity)}</b>${escapeHtml(issue.message)}</li>`).join("") || "<li>\u672a\u53d1\u73b0\u95ee\u9898</li>"}</ul></div>` : '<div class="quality-summary pending"><strong>\u5c1a\u65e0\u8d28\u91cf\u62a5\u544a</strong><span>\u70b9\u51fb\u6570\u636e\u5361\u7247\u7684\u201c\u8d28\u91cf\u68c0\u67e5\u201d\u751f\u6210\u62a5\u544a</span></div>';
+    const review = detail.review || {status: "pending", note: "", excluded_frames: []};
+    $("datasetDetail").innerHTML = `<strong>${escapeHtml(detail.name)}</strong><span>${escapeHtml(detail.path)} \u00b7 ${formatBytes(detail.bytes)} \u00b7 ${detail.file_count} \u4e2a\u6587\u4ef6</span>${reportHtml}<div class="dataset-review-form"><label>\u4eba\u5de5\u7ed3\u8bba<select id="datasetReviewStatus"><option value="pending">\u5f85\u590d\u6838</option><option value="accepted">\u901a\u8fc7</option><option value="rejected">\u62d2\u7edd</option></select></label><label>\u6392\u9664\u5e27<input id="datasetReviewFrames" value="${escapeHtml((review.excluded_frames || []).join(","))}" placeholder="\u4f8b\u5982 3,8-12"></label><label class="wide">\u5907\u6ce8<textarea id="datasetReviewNote" rows="2" placeholder="\u8bb0\u5f55\u62d2\u7edd\u539f\u56e0\u6216\u573a\u666f\u8bf4\u660e">${escapeHtml(review.note || "")}</textarea></label><button class="button secondary compact-button" id="saveDatasetReview">\u4fdd\u5b58\u7b5b\u9009</button></div><pre>${escapeHtml(files || "\u76ee\u5f55\u4e3a\u7a7a")}</pre>`;
+    $("datasetReviewStatus").value = review.status || "pending";
+    $("saveDatasetReview").addEventListener("click", () => saveDatasetReview(detail.path).catch((error) => toast(error.message, true)));
   } catch (error) { toast(error.message, true); }
+}
+async function inspectDataset(item) {
+  const stamp = new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14);
+  await createJob("dataset.inspect", {dataset: item.path, output: `run/test/dataset-quality/${item.name}-${stamp}`});
+  toast("\u8d28\u91cf\u68c0\u67e5\u4efb\u52a1\u5df2\u63d0\u4ea4\uff0c\u5b8c\u6210\u540e\u6253\u5f00\u8be6\u60c5\u67e5\u770b\u62a5\u544a");
 }
 async function refreshDatasets(showError = false) {
   try {
@@ -571,7 +609,7 @@ async function refreshSelectedJob(showError = false) {
     $("selectedJobState").className = `job-state ${job.state}`;
     $("selectedJobState").textContent = stateLabel(job.state);
     $("jobLog").textContent = log || "任务尚未产生输出。";
-    $("cancelJob").disabled = job.job_type === "policy.runtime_switch" || !["queued", "running"].includes(job.state);
+    $("cancelJob").disabled = ["policy.runtime_switch", "policy.model_activate"].includes(job.job_type) || !["queued", "running"].includes(job.state);
   } catch (error) {
     if (showError) toast(error.message, true);
   }
@@ -586,6 +624,36 @@ async function createJob(jobType, parameters = {}) {
   toast(`任务已提交：${job.job_type}`);
   await refreshJobs(true);
 }
+function modelCard(model) {
+  const card = document.createElement("div");
+  const manifest = model.manifest || {};
+  card.className = `model-item${model.active ? " active" : ""}${model.valid ? "" : " invalid"}`;
+  card.innerHTML = `<div><strong>${escapeHtml(model.provider)} / ${escapeHtml(model.version)}${model.active ? " \u00b7 \u5f53\u524d" : ""}</strong><small>${escapeHtml(manifest.model_id || "\u672c\u5730\u6a21\u578b")} @ ${escapeHtml(manifest.revision || "--")} \u00b7 ${formatBytes(model.bytes)}</small><span>\u8bad\u7ec3\u6570\u636e\uff1a${escapeHtml(manifest.dataset_id || "\u672a\u5173\u8054")}</span></div>${model.activatable && !model.active && model.valid ? '<button class="button secondary compact-button" data-model-activate>\u6fc0\u6d3b</button>' : ""}`;
+  card.querySelector("[data-model-activate]")?.addEventListener("click", async () => {
+    if (!confirm(`\u786e\u8ba4\u6fc0\u6d3b\u6a21\u578b ${model.version}\uff1f\n\n\u7cfb\u7edf\u5c06\u91cd\u542f SmolVLA Runtime\uff1b\u5931\u8d25\u65f6\u81ea\u52a8\u6062\u590d\u4e0a\u4e00\u7248\u672c\u3002`)) return;
+    try { await createJob("policy.model_activate", {provider: model.provider, version: model.version}); }
+    catch (error) { toast(error.message, true); if (!state.token) openToken(); }
+  });
+  return card;
+}
+async function refreshModels(showError = false) {
+  try {
+    const result = await fetch("/api/models", {cache: "no-store"}).then(async (response) => { const data = await response.json(); if (!response.ok) throw new Error(data.message || `HTTP ${response.status}`); return data; });
+    const list = $("modelList"); list.replaceChildren();
+    if (!(result.models || []).length) list.innerHTML = '<div class="job-empty"><strong>\u5c1a\u65e0\u6a21\u578b</strong><span>\u4f7f\u7528\u4e0a\u65b9\u8868\u5355\u5b89\u88c5\u7b2c\u4e00\u4e2a\u7248\u672c</span></div>';
+    else (result.models || []).forEach((model) => list.appendChild(modelCard(model)));
+  } catch (error) { if (showError) toast(error.message, true); }
+}
+$("modelInstallForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const parameters = {provider: $("modelProvider").value, version: $("modelVersion").value.trim(), model_id: $("modelRepository").value.trim(), revision: $("modelRevision").value.trim() || "main", dataset_id: $("modelDatasetId").value.trim()};
+  if (!parameters.version || !parameters.model_id) {toast("\u8bf7\u586b\u5199\u7248\u672c\u540d\u548c\u6a21\u578b\u4ed3\u5e93", true); return;}
+  if (!confirm(`\u786e\u8ba4\u4e0b\u8f7d\u5e76\u5b89\u88c5 ${parameters.model_id}@${parameters.revision}\uff1f\n\n\u5b89\u88c5\u4e0d\u4f1a\u81ea\u52a8\u5207\u6362\u5f53\u524d\u6a21\u578b\u3002`)) return;
+  try { await createJob("policy.model_install", parameters); }
+  catch (error) { toast(error.message, true); if (!state.token) openToken(); }
+});
+$("refreshModels").addEventListener("click", () => refreshModels(true));
+
 ["datasetInput", "datasetOutput", "datasetTool"].forEach((id) => $(id).addEventListener("input", updateCommand));
 $("copyCommand").addEventListener("click", async () => {
   try { await navigator.clipboard.writeText($("generatedCommand").textContent); toast("命令已复制"); }
@@ -1463,3 +1531,5 @@ setInterval(refreshPipelineHistory, 5000);
 setInterval(refreshComponents, 2000);
 setInterval(() => refreshJobs(), 2000);
 setInterval(() => refreshDatasets(), 5000);
+setInterval(() => refreshModels(), 5000);
+refreshModels();

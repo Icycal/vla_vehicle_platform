@@ -40,7 +40,7 @@ services:
       SMOLVLA_LINEAR_LIMIT: ${SMOLVLA_LINEAR_LIMIT:-0.2}
       SMOLVLA_ANGULAR_LIMIT: ${SMOLVLA_ANGULAR_LIMIT:-0.5}
     volumes:
-      - ${VLA_PROJECT_ROOT}/run/models/smolvla_base:/models/smolvla_base:ro
+      - ${SMOLVLA_MODEL_ROOT:-${VLA_PROJECT_ROOT}/run/models/smolvla_base}:/models/smolvla_base:ro
       - ${VLA_PROJECT_ROOT}/run/models/huggingface:/models/huggingface:ro
       - ${VLA_PROJECT_ROOT}/run/policy:/run/vla-policy
       - ${VLA_PROJECT_ROOT}/run/test/smolvla-demo/images:/test/images:ro

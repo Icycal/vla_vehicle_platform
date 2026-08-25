@@ -1,4 +1,4 @@
-﻿# VLA 车辆平台总体方案设计
+# 赤兔（Chitu）Vehicle VLA Platform Architecture
 
 ## 1. 文档定位
 
