@@ -1,9 +1,11 @@
 <launch>
   <arg name="shadow_params" default="$(find-pkg-share vehicle_bringup)/config/phase1_shadow.yaml"/>
+  <arg name="episode_storage_root" default=""/>
   <node pkg="vehicle_data" exec="shadow_evaluator" name="shadow_evaluator" output="screen">
     <param from="$(var shadow_params)"/>
   </node>
   <node pkg="vehicle_data" exec="episode_recorder" name="episode_recorder" output="screen">
     <param from="$(var shadow_params)"/>
+    <param name="storage_root" value="$(var episode_storage_root)"/>
   </node>
 </launch>

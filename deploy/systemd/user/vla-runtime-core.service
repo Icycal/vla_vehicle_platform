@@ -3,11 +3,14 @@ Description=VLA Vehicle Runtime Core
 After=network.target
 [Service]
 Type=simple
-WorkingDirectory=/home/wheeltec/vla_vehicle_platform
+WorkingDirectory=@VLA_PROJECT_ROOT@
 Environment=ROS_DOMAIN_ID=43
-ExecStart=/home/wheeltec/vla_vehicle_platform/scripts/run_managed_component.sh runtime_core
-StandardOutput=append:/home/wheeltec/vla_vehicle_platform/run/log/components/runtime_core.log
-StandardError=append:/home/wheeltec/vla_vehicle_platform/run/log/components/runtime_core.log
+Environment=VLA_STATE_ROOT=@VLA_STATE_ROOT@
+Environment=VLA_RUNTIME_ROOT=@VLA_RUNTIME_ROOT@
+Environment=VLA_LOG_ROOT=@VLA_LOG_ROOT@
+ExecStart=@VLA_PROJECT_ROOT@/scripts/run_managed_component.sh runtime_core
+StandardOutput=append:@VLA_LOG_ROOT@/components/runtime_core.log
+StandardError=append:@VLA_LOG_ROOT@/components/runtime_core.log
 Restart=on-failure
 RestartSec=2
 KillMode=mixed

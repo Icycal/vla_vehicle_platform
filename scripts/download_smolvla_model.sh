@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT=${VLA_PROJECT_ROOT:-/home/wheeltec/vla_vehicle_platform}
+ROOT=${VLA_PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
 IMAGE=${LEROBOT_IMAGE:-vla-lerobot-compat:0.4.3}
 MODEL_ID=${SMOLVLA_MODEL_ID:-lerobot/smolvla_base}
 REVISION=${SMOLVLA_MODEL_REVISION:-main}

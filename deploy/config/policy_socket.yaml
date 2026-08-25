@@ -1,5 +1,5 @@
 vla_policy_gateway:
   ros__parameters:
     transport: unix_socket
-    socket_path: "/var/lib/vla-vehicle/policy/policy.sock"
+    socket_path: "@VLA_VAR_ROOT@/policy/policy.sock"
     transport_timeout: 1.0

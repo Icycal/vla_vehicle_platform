@@ -35,10 +35,12 @@ public:
   {
     const auto transport = declare_parameter<std::string>("transport", "mock");
     const auto socket_path = declare_parameter<std::string>(
-      "socket_path", "/home/wheeltec/vla_vehicle_platform/run/policy/policy.sock");
+      "socket_path", "/run/vla-policy/policy.sock");
     const auto timeout = declare_parameter<double>("transport_timeout", 35.0);
-    artifact_root_ = declare_parameter<std::string>(
-      "artifact_root", "/home/wheeltec/vla_vehicle_platform/run/ops/debug");
+    artifact_root_ = declare_parameter<std::string>("artifact_root", "");
+    if (artifact_root_.empty()) {
+      throw std::invalid_argument("artifact_root must be configured");
+    }
     observation_timeout_ = declare_parameter<double>("observation_timeout", 1.0);
     command_timeout_ = declare_parameter<double>("command_timeout", 0.5);
     stationary_linear_threshold_ = declare_parameter<double>("stationary_linear_threshold", 0.02);

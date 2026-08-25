@@ -3,7 +3,9 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include <rclcpp/rclcpp.hpp>
+#include <geometry_msgs/msg/twist.hpp>
 #include <sensor_msgs/msg/compressed_image.hpp>
+#include <sensor_msgs/msg/image.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <vehicle_interfaces/msg/episode_state.hpp>
 #include <vehicle_interfaces/msg/observation_status.hpp>
@@ -291,6 +293,15 @@ double thermal_temperature(const std::string & expected_type)
   return 0.0;
 }
 
+double first_thermal_temperature(const std::vector<std::string> & expected_types)
+{
+  for (const auto & expected_type : expected_types) {
+    const auto value = thermal_temperature(expected_type);
+    if (value > 0.0) {return value;}
+  }
+  return 0.0;
+}
+
 double cpu_usage_percent()
 {
   std::ifstream stream("/proc/stat");
@@ -326,6 +337,9 @@ struct HostMetrics
   double gpu_usage{0.0};
   double gpu_temperature{0.0};
   double gpu_frequency_mhz{0.0};
+  bool gpu_available{false};
+  std::string gpu_backend{"unavailable"};
+  std::string gpu_memory_mode{"unknown"};
   std::uint32_t cpu_cores{0};
 };
 
@@ -347,11 +361,19 @@ HostMetrics host_metrics()
     if (key == "SwapFree:") {metrics.swap_free = value / 1024.0;}
   }
   metrics.cpu_usage = cpu_usage_percent();
-  metrics.cpu_temperature = thermal_temperature("cpu-thermal");
-  metrics.gpu_temperature = thermal_temperature("gpu-thermal");
-  metrics.gpu_usage = numeric_file("/sys/devices/platform/bus@0/17000000.gpu/load") / 10.0;
-  metrics.gpu_frequency_mhz = numeric_file(
-    "/sys/devices/platform/bus@0/17000000.gpu/devfreq/17000000.gpu/cur_freq") / 1000000.0;
+  metrics.cpu_temperature = first_thermal_temperature(
+    {"cpu-thermal", "x86_pkg_temp", "Package id 0"});
+  const std::filesystem::path jetson_gpu_root(
+    "/sys/devices/platform/bus@0/17000000.gpu");
+  if (std::filesystem::is_directory(jetson_gpu_root)) {
+    metrics.gpu_available = true;
+    metrics.gpu_backend = "jetson-sysfs";
+    metrics.gpu_memory_mode = "unified";
+    metrics.gpu_temperature = thermal_temperature("gpu-thermal");
+    metrics.gpu_usage = numeric_file(jetson_gpu_root / "load") / 10.0;
+    metrics.gpu_frequency_mhz = numeric_file(
+      jetson_gpu_root / "devfreq/17000000.gpu/cur_freq") / 1000000.0;
+  }
   metrics.cpu_cores = std::thread::hardware_concurrency();
   return metrics;
 }
@@ -421,6 +443,8 @@ private:
   std::string bind_, token_, web_root_, project_root_, jobs_root_;
   int port_{8088}, limit_{1048576};
   double service_seconds_{2.0}, stale_seconds_{3.0}, debug_timeout_seconds_{45.0};
+  double camera_dark_mean_threshold_{2.0}, command_timeout_seconds_{0.5};
+  double stationary_linear_threshold_{0.02}, stationary_angular_threshold_{0.05};
   std::atomic<bool> running_{false};
   int server_{-1};
   std::thread thread_;
@@ -439,6 +463,12 @@ private:
   std::chrono::steady_clock::time_point camera_time_{};
   std::chrono::system_clock::time_point camera_wall_time_{};
   std::uint64_t camera_sequence_{0};
+  bool camera_content_analyzed_{false};
+  bool camera_content_valid_{false};
+  double camera_mean_intensity_{0.0};
+  unsigned int camera_max_intensity_{0};
+  geometry_msgs::msg::Twist latest_command_;
+  std::chrono::steady_clock::time_point command_received_{};
   struct ActiveDebugSession {
     std::string id;
     std::string task;
@@ -446,13 +476,16 @@ private:
     std::string stop_reason;
     std::string last_observation_id;
     std::string last_trace_id;
+    std::string baseline_observation_id;
     std::chrono::steady_clock::time_point started{};
     std::chrono::steady_clock::time_point last_step{};
+    std::chrono::steady_clock::time_point finished{};
     int steps{0};
     int max_steps{100};
     double max_duration_seconds{60.0};
     double frequency_hz{1.0};
     bool shadow_only{true};
+    bool waiting_for_task_observation{false};
   } active_debug_;
   rclcpp::TimerBase::SharedPtr active_debug_timer_;
   rclcpp::Subscription<vehicle_interfaces::msg::SystemState>::SharedPtr system_sub_;
@@ -462,7 +495,9 @@ private:
   rclcpp::Subscription<vehicle_interfaces::msg::ShadowMetrics>::SharedPtr shadow_sub_;
   rclcpp::Subscription<vehicle_interfaces::msg::SafetyEvent>::SharedPtr safety_sub_;
   rclcpp::Subscription<vehicle_interfaces::msg::PipelineTrace>::SharedPtr pipeline_sub_;
+  rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr raw_camera_sub_;
   rclcpp::Subscription<sensor_msgs::msg::CompressedImage>::SharedPtr camera_sub_;
+  rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr command_sub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr task_pub_;
   rclcpp::Client<vehicle_interfaces::srv::StartEpisode>::SharedPtr start_client_;
   rclcpp::Client<vehicle_interfaces::srv::StopEpisode>::SharedPtr stop_client_;
@@ -486,12 +521,18 @@ VehicleOpsApi::VehicleOpsApi() : Node("vehicle_ops_api")
   service_seconds_ = declare_parameter<double>("service_timeout_seconds", 2.0);
   stale_seconds_ = declare_parameter<double>("stale_after_seconds", 3.0);
   debug_timeout_seconds_ = declare_parameter<double>("debug_timeout_seconds", 45.0);
+  camera_dark_mean_threshold_ = declare_parameter<double>("camera_dark_mean_threshold", 2.0);
+  command_timeout_seconds_ = declare_parameter<double>("runtime_switch_command_timeout_seconds", 0.5);
+  stationary_linear_threshold_ = declare_parameter<double>("runtime_switch_stationary_linear_threshold", 0.02);
+  stationary_angular_threshold_ = declare_parameter<double>("runtime_switch_stationary_angular_threshold", 0.05);
   token_ = declare_parameter<std::string>("operator_token", "");
   web_root_ = declare_parameter<std::string>("web_root", "");
-  project_root_ = declare_parameter<std::string>("project_root", "/home/wheeltec/vla_vehicle_platform");
-  jobs_root_ = declare_parameter<std::string>("jobs_root", project_root_ + "/run/ops/jobs");
-  if (port_ < 1 || port_ > 65535 || !std::filesystem::is_directory(web_root_)) {
-    throw std::invalid_argument("Invalid port or web_root");
+  project_root_ = declare_parameter<std::string>("project_root", "");
+  jobs_root_ = declare_parameter<std::string>("jobs_root", "");
+  if (port_ < 1 || port_ > 65535 || !std::filesystem::is_directory(web_root_) ||
+    project_root_.empty() || jobs_root_.empty())
+  {
+    throw std::invalid_argument("Invalid port, web_root, project_root, or jobs_root");
   }
   const auto state_qos = rclcpp::QoS(1).reliable().transient_local();
   system_sub_ = create_subscription<vehicle_interfaces::msg::SystemState>(
@@ -518,13 +559,50 @@ VehicleOpsApi::VehicleOpsApi() : Node("vehicle_ops_api")
       } else {
         pipeline_history_.front() = *message;
       }
-    });  camera_sub_ = create_subscription<sensor_msgs::msg::CompressedImage>(
+    });
+  raw_camera_sub_ = create_subscription<sensor_msgs::msg::Image>(
+    "/camera/image_raw", rclcpp::SensorDataQoS(), [this](sensor_msgs::msg::Image::SharedPtr message) {
+      const bool analyzable = message->encoding == "rgb8" || message->encoding == "bgr8" ||
+        message->encoding == "rgba8" || message->encoding == "bgra8" || message->encoding == "mono8";
+      if (!analyzable || message->data.empty()) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        camera_content_analyzed_ = false;
+        camera_content_valid_ = true;
+        return;
+      }
+      const std::size_t channels = message->encoding == "mono8" ? 1U :
+        ((message->encoding == "rgba8" || message->encoding == "bgra8") ? 4U : 3U);
+      const std::size_t stride = std::max<std::size_t>(channels, message->data.size() / 8192U);
+      std::uint64_t sum = 0;
+      std::size_t samples = 0;
+      unsigned int maximum = 0;
+      for (std::size_t index = 0; index < message->data.size(); index += stride) {
+        if (channels == 4U && index % channels == 3U) continue;
+        const auto value = static_cast<unsigned int>(message->data[index]);
+        sum += value;
+        maximum = std::max(maximum, value);
+        ++samples;
+      }
+      const double mean = samples == 0 ? 0.0 : static_cast<double>(sum) / static_cast<double>(samples);
+      std::lock_guard<std::mutex> lock(mutex_);
+      camera_content_analyzed_ = true;
+      camera_mean_intensity_ = mean;
+      camera_max_intensity_ = maximum;
+      camera_content_valid_ = mean >= camera_dark_mean_threshold_;
+    });
+  camera_sub_ = create_subscription<sensor_msgs::msg::CompressedImage>(
     "/camera/image_compressed", rclcpp::SensorDataQoS(), [this](sensor_msgs::msg::CompressedImage::SharedPtr message) {
       std::lock_guard<std::mutex> lock(mutex_);
       camera_data_ = message->data;
       camera_time_ = std::chrono::steady_clock::now();
       camera_wall_time_ = std::chrono::system_clock::now();
       ++camera_sequence_;
+    });
+  command_sub_ = create_subscription<geometry_msgs::msg::Twist>(
+    "/cmd_vel", 10, [this](geometry_msgs::msg::Twist::SharedPtr message) {
+      std::lock_guard<std::mutex> lock(mutex_);
+      latest_command_ = *message;
+      command_received_ = std::chrono::steady_clock::now();
     });
   task_pub_ = create_publisher<std_msgs::msg::String>(
     "/vla/task", rclcpp::QoS(1).reliable().transient_local());
@@ -804,6 +882,8 @@ HttpResponse VehicleOpsApi::pipeline_history()
   active_debug_.task = task_value;
   active_debug_.status = "RUNNING";
   active_debug_.started = now;
+  active_debug_.baseline_observation_id = pipeline_trace_ ? pipeline_trace_->observation_id : "";
+  active_debug_.waiting_for_task_observation = true;
   active_debug_.max_steps = std::clamp(input.value("max_steps", 100), 1, 10000);
   active_debug_.max_duration_seconds = std::clamp(input.value("max_duration_seconds", 60.0), 1.0, 3600.0);
   active_debug_.frequency_hz = std::clamp(input.value("hz", 1.0), 0.1, 5.0);
@@ -816,15 +896,19 @@ HttpResponse VehicleOpsApi::pipeline_history()
 HttpResponse VehicleOpsApi::active_debug_get()
 {
   std::lock_guard<std::mutex> lock(mutex_);
+  const auto elapsed_end = active_debug_.finished.time_since_epoch().count() == 0 ?
+    std::chrono::steady_clock::now() : active_debug_.finished;
   const auto elapsed = active_debug_.started.time_since_epoch().count() == 0 ? 0.0 :
-    std::chrono::duration<double>(std::chrono::steady_clock::now() - active_debug_.started).count();
+    std::chrono::duration<double>(elapsed_end - active_debug_.started).count();
   return {200, "application/json; charset=utf-8", nlohmann::json({
     {"session_id", active_debug_.id}, {"task", active_debug_.task}, {"status", active_debug_.status},
     {"stop_reason", active_debug_.stop_reason}, {"steps", active_debug_.steps},
     {"elapsed_seconds", elapsed}, {"max_steps", active_debug_.max_steps},
     {"max_duration_seconds", active_debug_.max_duration_seconds}, {"frequency_hz", active_debug_.frequency_hz},
     {"shadow_only", active_debug_.shadow_only}, {"last_observation_id", active_debug_.last_observation_id},
-    {"last_trace_id", active_debug_.last_trace_id}}).dump() + "\n", {{"Cache-Control", "no-store"}}};
+    {"last_trace_id", active_debug_.last_trace_id},
+    {"waiting_for_task_observation", active_debug_.waiting_for_task_observation}}).dump() + "\n",
+    {{"Cache-Control", "no-store"}}};
 }
 HttpResponse VehicleOpsApi::active_debug_control(const std::string & action)
 {
@@ -834,22 +918,59 @@ HttpResponse VehicleOpsApi::active_debug_control(const std::string & action)
   else if (action == "resume" && active_debug_.status == "PAUSED") active_debug_.status = "RUNNING";
   else if (action == "stop" && (active_debug_.status == "RUNNING" || active_debug_.status == "PAUSED")) {
     active_debug_.status = "STOPPED"; active_debug_.stop_reason = "Stopped by operator";
+    active_debug_.finished = std::chrono::steady_clock::now();
   } else {return error(409, "Invalid active debug operation");}
   return success("Active debug session updated");
 }
 void VehicleOpsApi::active_debug_tick()
 {
   std::lock_guard<std::mutex> lock(mutex_);
-  if (active_debug_.status != "RUNNING" || !pipeline_trace_) return;
+  if (active_debug_.status != "RUNNING") return;
   const auto now = std::chrono::steady_clock::now();
   const auto elapsed = std::chrono::duration<double>(now - active_debug_.started).count();
   if (elapsed >= active_debug_.max_duration_seconds) {
-    active_debug_.status = "TIMED_OUT"; active_debug_.stop_reason = "Maximum duration reached"; return;
+    active_debug_.status = "TIMED_OUT"; active_debug_.stop_reason = "Maximum duration reached";
+    active_debug_.finished = now; return;
   }
   if (active_debug_.steps >= active_debug_.max_steps) {
-    active_debug_.status = "STOPPED"; active_debug_.stop_reason = "Maximum steps reached"; return;
+    active_debug_.status = "STOPPED"; active_debug_.stop_reason = "Maximum steps reached";
+    active_debug_.finished = now; return;
+  }
+  constexpr double task_observation_timeout_seconds = 5.0;
+  if (!pipeline_trace_) {
+    if (active_debug_.waiting_for_task_observation && elapsed >= task_observation_timeout_seconds) {
+      active_debug_.status = "FAILED";
+      active_debug_.stop_reason = "Timed out waiting for an Observation containing the active task";
+      active_debug_.finished = now;
+    }
+    return;
   }
   const auto & trace = *pipeline_trace_;
+  if (active_debug_.waiting_for_task_observation) {
+    std::string observation_task;
+    for (const auto & stage : trace.stages) {
+      if (stage.stage_id != "observation_assembly") continue;
+      try {
+        const auto detail = nlohmann::json::parse(stage.detail_json);
+        if (detail.contains("task") && detail.at("task").is_string()) {
+          observation_task = detail.at("task").get<std::string>();
+        }
+      } catch (const nlohmann::json::exception &) {
+      }
+      break;
+    }
+    const bool is_new_observation = !trace.observation_id.empty() &&
+      trace.observation_id != active_debug_.baseline_observation_id;
+    if (!is_new_observation || observation_task != active_debug_.task) {
+      if (elapsed >= task_observation_timeout_seconds) {
+        active_debug_.status = "FAILED";
+        active_debug_.stop_reason = "Timed out waiting for an Observation containing the active task";
+        active_debug_.finished = now;
+      }
+      return;
+    }
+    active_debug_.waiting_for_task_observation = false;
+  }
   const auto step_period = std::chrono::duration<double>(1.0 / active_debug_.frequency_hz);
   if (active_debug_.last_step.time_since_epoch().count() != 0 &&
     std::chrono::duration<double>(now - active_debug_.last_step).count() < step_period.count()) return;
@@ -862,11 +983,13 @@ void VehicleOpsApi::active_debug_tick()
     const auto message = lowercase(stage.message + " " + stage.output_summary);
     if (message.find("success") != std::string::npos ||
       message.find("completed") != std::string::npos || message.find("terminate") != std::string::npos) {
-      active_debug_.status = "SUCCEEDED"; active_debug_.stop_reason = stage.label + ": task completion reported"; return;
+      active_debug_.status = "SUCCEEDED"; active_debug_.stop_reason = stage.label + ": task completion reported";
+      active_debug_.finished = now; return;
     }
     if (stage.status == vehicle_interfaces::msg::PipelineStage::STATUS_FAILED ||
       stage.status == vehicle_interfaces::msg::PipelineStage::STATUS_REJECTED) {
-      active_debug_.status = "FAILED"; active_debug_.stop_reason = stage.label + ": " + stage.message; return;
+      active_debug_.status = "FAILED"; active_debug_.stop_reason = stage.label + ": " + stage.message;
+      active_debug_.finished = now; return;
     }
   }
 }HttpResponse VehicleOpsApi::components_list()
@@ -1188,6 +1311,12 @@ HttpResponse VehicleOpsApi::debug_capture(const std::string & body)
   } else {
     request->task_override = content;
   }
+  if (!request->use_image_override) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (camera_content_analyzed_ && !camera_content_valid_) {
+      return error(409, "Camera is publishing near-black frames; check the lens, USB connection, or restart the front camera");
+    }
+  }
   auto future = debug_capture_client_->async_send_request(request);
   if (future.wait_for(std::chrono::milliseconds(static_cast<int>(service_seconds_ * 1000))) !=
     std::future_status::ready)
@@ -1245,6 +1374,34 @@ HttpResponse VehicleOpsApi::debug_image(
 HttpResponse VehicleOpsApi::jobs_create(const std::string & body)
 {
   try {
+    const auto input = nlohmann::json::parse(body, nullptr, false);
+    if (input.is_discarded()) {throw std::invalid_argument("Request body must be valid JSON");}
+    if (input.value("job_type", "") == "policy.runtime_switch") {
+      std::lock_guard<std::mutex> lock(mutex_);
+      const auto now = std::chrono::steady_clock::now();
+      const auto system_age = age(system_, now);
+      if (!system_.message || !fresh(system_age) ||
+        system_.message->mode != vehicle_interfaces::msg::SystemState::MODE_VLA_SHADOW)
+      {
+        return error(409, "Policy Runtime can only be switched while the vehicle is in VLA_SHADOW mode");
+      }
+      if (active_debug_.status == "RUNNING" || active_debug_.status == "PAUSED") {
+        return error(409, "Stop the active debug session before switching Policy Runtime");
+      }
+      if (episode_.message &&
+        episode_.message->state == vehicle_interfaces::msg::EpisodeState::STATE_RECORDING)
+      {
+        return error(409, "Stop episode recording before switching Policy Runtime");
+      }
+      const bool command_recent = command_received_.time_since_epoch().count() != 0 &&
+        std::chrono::duration<double>(now - command_received_).count() <= command_timeout_seconds_;
+      if (command_recent &&
+        (std::abs(latest_command_.linear.x) > stationary_linear_threshold_ ||
+        std::abs(latest_command_.angular.z) > stationary_angular_threshold_))
+      {
+        return error(409, "Vehicle command is not stationary");
+      }
+    }
     return {202, "application/json; charset=utf-8", jobs_->create(body), {{"Cache-Control", "no-store"}}};
   } catch (const std::invalid_argument & error_value) {
     return error(400, error_value.what());
@@ -1322,7 +1479,9 @@ std::string VehicleOpsApi::status_json()
     ",\"gpu_usage_percent\":" << host.gpu_usage <<
     ",\"gpu_temperature_c\":" << host.gpu_temperature <<
     ",\"gpu_frequency_mhz\":" << host.gpu_frequency_mhz <<
-    ",\"gpu_memory_mode\":\"unified\""
+    ",\"gpu_available\":" << (host.gpu_available ? "true" : "false") <<
+    ",\"gpu_backend\":\"" << host.gpu_backend << "\"" <<
+    ",\"gpu_memory_mode\":\"" << host.gpu_memory_mode << "\""
     ",\"uptime_seconds\":" << host.uptime << "},";  out << "\"system\":{\"received\":" << (system_.message ? "true" : "false") <<
     ",\"fresh\":" << (fresh(system_age) ? "true" : "false") << ",\"age_ms\":" << system_age;
   if (system_.message) {
@@ -1386,7 +1545,11 @@ std::string VehicleOpsApi::status_json()
     ",\"fresh\":" << (fresh(camera_age) ? "true" : "false") <<
     ",\"age_ms\":" << camera_age << ",\"bytes\":" << camera_data_.size() <<
     ",\"frame_received_at_ms\":" << camera_received_at_ms <<
-    ",\"frame_sequence\":" << camera_sequence_ << "}}\n";
+    ",\"frame_sequence\":" << camera_sequence_ <<
+    ",\"content_analyzed\":" << (camera_content_analyzed_ ? "true" : "false") <<
+    ",\"content_valid\":" << (camera_content_valid_ ? "true" : "false") <<
+    ",\"mean_intensity\":" << camera_mean_intensity_ <<
+    ",\"max_intensity\":" << camera_max_intensity_ << "}}\n";
   return out.str();
 }
 int main(int argc, char ** argv)

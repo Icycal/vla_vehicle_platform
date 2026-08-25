@@ -59,3 +59,9 @@ POST /api/active-debug/session/stop
 打开 Vehicle Ops 的 `VLA 调试` 页面，在“实时链路”顶部的“主动调试链路”卡片输入任务，点击“开始主动调试”。页面每秒刷新会话状态，同时继续展示当前实时链路的八个阶段。
 
 主动调试结束后查看“停止原因”和最近 Observation；需要重新运行时再次输入任务并启动新会话。
+
+## 启动同步
+
+创建会话后，后端会先等待一条新的、且 `Observation.task` 与当前会话任务完全一致的 Pipeline Trace。任务发布前残留的旧 Trace 不计入步数，也不会触发失败或完成条件。
+
+如果 5 秒内没有收到包含当前任务的 Observation，会话会以同步超时失败，并提示检查 `/vla/task`、`/vla/observation` 和 Observation Adapter。会话进入成功、失败、停止或超时等终态后，页面中的运行时长会固定在终态发生时刻。

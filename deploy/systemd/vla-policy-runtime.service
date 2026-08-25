@@ -5,13 +5,14 @@ Requires=docker.service
 
 [Service]
 Type=simple
-User=wheeltec
-Group=wheeltec
-SupplementaryGroups=docker
-EnvironmentFile=-/etc/vla-vehicle/vehicle.env
-ExecStartPre=/usr/bin/test -L /opt/vla-vehicle/current
-ExecStart=/opt/vla-vehicle/current/bin/run_policy_runtime.sh
-ExecStop=/opt/vla-vehicle/current/bin/stop_policy_runtime.sh
+User=@VLA_SERVICE_USER@
+Group=@VLA_SERVICE_GROUP@
+SupplementaryGroups=@VLA_POLICY_GROUPS@
+EnvironmentFile=-@VLA_ETC_ROOT@/vehicle.env
+Environment=VLA_ENV_FILE=@VLA_ETC_ROOT@/vehicle.env
+ExecStartPre=/usr/bin/test -L @VLA_OPT_ROOT@/current
+ExecStart=@VLA_OPT_ROOT@/current/bin/run_policy_runtime.sh
+ExecStop=@VLA_OPT_ROOT@/current/bin/stop_policy_runtime.sh
 Restart=on-failure
 RestartSec=3
 TimeoutStopSec=30

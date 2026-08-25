@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
 set -eo pipefail
 
-target="${1:-${VLA_DEPLOY_TARGET:-wheeltec@10.101.70.232}}"
+target="${1:-${VLA_DEPLOY_TARGET:-}}"
 non_interactive="${VLA_DEPLOY_NON_INTERACTIVE:-0}"
+
+if [[ -z "${target}" ]]; then
+  echo "Rollback target is required. Pass USER@HOST or set VLA_DEPLOY_TARGET." >&2
+  exit 2
+fi
 
 if [[ "${non_interactive}" == "1" ]]; then
   exec ssh "${target}" "sudo -n /usr/local/sbin/vla-rollback-release"

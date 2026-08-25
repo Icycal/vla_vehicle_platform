@@ -2,16 +2,19 @@
   <arg name="bind_address" default="0.0.0.0"/>
   <arg name="port" default="8088"/>
   <arg name="operator_token" default=""/>
-  <arg name="project_root" default="/home/wheeltec/vla_vehicle_platform"/>
-  <arg name="jobs_root" default="/home/wheeltec/vla_vehicle_platform/run/ops/jobs"/>
+  <arg name="project_root" default=""/>
+  <arg name="state_root" default=""/>
+  <arg name="log_root" default=""/>
+  <arg name="jobs_root" default=""/>
 
   <node pkg="vehicle_operation" exec="operation_orchestrator" name="operation_orchestrator" output="screen">
     <param from="$(find-pkg-share vehicle_operation)/config/components.yaml"/>
+    <param name="log_root" value="$(var log_root)"/>
   </node>
 
   <node pkg="vehicle_storage" exec="storage_manager" name="storage_manager" output="screen">
     <param from="$(find-pkg-share vehicle_storage)/config/storage.yaml"/>
-    <param name="project_root" value="$(var project_root)"/>
+    <param name="project_root" value="$(var state_root)"/>
   </node>
 
   <node pkg="vehicle_ops" exec="vehicle_ops_api" name="vehicle_ops_api" output="screen">

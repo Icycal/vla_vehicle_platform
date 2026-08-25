@@ -1,1 +1,1 @@
-wheeltec ALL=(root) NOPASSWD: /usr/local/sbin/vla-install-release *, /usr/local/sbin/vla-rollback-release
+@VLA_DEPLOY_USER@ ALL=(root) NOPASSWD: /usr/local/sbin/vla-install-release *, /usr/local/sbin/vla-rollback-release

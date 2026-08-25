@@ -1,7 +1,12 @@
 ﻿const $ = (id) => document.getElementById(id);
-const state = { datasetCatalog: { episodes: [], exports: [], lerobot: [], archives: [] }, datasetFailureLogJobId: "", datasetFailureLog: "", selectedLerobotPath: "", token: sessionStorage.getItem("vehicleOpsToken") || "", cameraSequence: 0, pipelineCameraSequence: 0, cameraStatus: null, pipelineCameraActive: false, selectedJobId: "", jobs: [], debugRunId: "", debugResult: null, debugImageUrls: {}, pipelineTrace: null, pipelineHistory: [], selectedPipelineStageId: "", selectedPipelineHistoryId: "", inspectorMode: "live", components: [], componentProfiles: [], selectedComponentId: "", storage: null, storageItems: [], selectedStorageCategory: "", systemMode: "", debugInputSource: "camera", debugUpload: null, observationWidth: 640, observationHeight: 480 };
+const state = { datasetCatalog: { episodes: [], exports: [], lerobot: [], archives: [] }, datasetFailureLogJobId: "", datasetFailureLog: "", selectedLerobotPath: "", token: sessionStorage.getItem("vehicleOpsToken") || "", cameraSequence: 0, pipelineCameraSequence: 0, cameraStatus: null, pipelineCameraActive: false, selectedJobId: "", jobs: [], debugRunId: "", debugResult: null, debugImageUrls: {}, pipelineTrace: null, pipelineHistory: [], selectedPipelineStageId: "", selectedPipelineHistoryId: "", inspectorMode: "live", components: [], componentProfiles: [], selectedComponentId: "", storage: null, storageItems: [], selectedStorageCategory: "", systemMode: "", policyStatus: null, systemStatus: null, runtimeSwitchJobId: "", runtimeSwitchTarget: "", runtimeSwitchNotified: false, debugInputSource: "camera", debugUpload: null, observationWidth: 640, observationHeight: 480 };
 const text = (id, value) => { $(id).textContent = value ?? "—"; };
 const number = (value, digits = 1) => Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : "--";
+const milliseconds = (value) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return "--";
+  return numeric > 0 && numeric < 0.1 ? numeric.toFixed(3) : numeric.toFixed(1);
+};
 function setMetricTooltip(valueId, heading, rows) {
   const value = $(valueId);
   const card = value?.closest(".metric");
@@ -112,7 +117,7 @@ function renderCameraView(camera, ids, sequenceKey, enabled = true) {
   const received = Boolean(camera?.received && enabled);
   $(ids.overlay).classList.toggle("visible", received);
   $(ids.overlay).classList.toggle("stale", received && !camera?.fresh);
-  text(ids.label, camera?.fresh ? "实时快照" : "最后快照");
+  text(ids.label, camera?.content_analyzed && !camera?.content_valid ? "黑帧异常" : (camera?.fresh ? "实时快照" : "最后快照"));
   $(ids.image).style.display = received ? "block" : "none";
   $(ids.empty).style.display = received ? "none" : "grid";
   const sequence = Number(camera?.frame_sequence || 0);
@@ -136,8 +141,39 @@ function updateDebugModeGuard(system) {
   $("enterShadowMode").disabled = !received || shadowReady;
   $("enterShadowMode").textContent = shadowReady ? "已处于影子模式" : "进入影子调试模式";
 }
+function policyRuntimeType(policy) {
+  const provider = String(policy?.provider_id || "").toLowerCase();
+  if (provider.includes("smolvla")) return "smolvla";
+  if (provider.includes("mock")) return "mock";
+  return "unknown";
+}
+function updatePolicyRuntimeCard(policy = state.policyStatus, system = state.systemStatus) {
+  state.policyStatus = policy || null;
+  state.systemStatus = system || null;
+  const current = policyRuntimeType(policy);
+  const switching = Boolean(state.runtimeSwitchJobId);
+  const shadowReady = system?.mode_name === "VLA_SHADOW";
+  const card = $("policyRuntimeCard");
+  card.dataset.state = switching ? "switching" : (policy?.state_name === "READY" ? "ready" : "warning");
+  text("policyRuntimeName", switching
+    ? `正在切换到 ${state.runtimeSwitchTarget === "smolvla" ? "SmolVLA" : "Mock"}`
+    : `${policy?.provider_id || "Provider 未连接"} / ${policy?.model_id || "--"}`);
+  text("policyRuntimeHint", switching ? "正在停止旧 Runtime、启动目标 Runtime 并等待健康检查"
+    : (!shadowReady ? "请先进入 VLA_SHADOW 模式后再切换"
+      : (policy?.message || "切换只影响 Shadow 推理，不发布底盘控制命令")));
+  document.querySelectorAll("[data-runtime-provider]").forEach((button) => {
+    const selected = button.dataset.runtimeProvider === current;
+    button.disabled = switching || !shadowReady || selected;
+    button.textContent = selected
+      ? (current === "smolvla" ? "SmolVLA 使用中" : "Mock 使用中")
+      : (button.dataset.runtimeProvider === "smolvla" ? "切换 SmolVLA" : "切换 Mock");
+  });
+}
 function render(data) {
   badge($("connectionBadge"), true, "API ONLINE", "连接中");
+  state.policyStatus = data.policy || null;
+  state.systemStatus = data.system || null;
+  updatePolicyRuntimeCard(data.policy, data.system);
   text("modeName", data.system?.mode_name || "NO STATE");
   updateDebugModeGuard(data.system);
   text("systemMessage", data.system?.message || "尚未收到 Supervisor 状态");
@@ -161,8 +197,11 @@ function render(data) {
   text("cpuMeta", `${data.host?.cpu_cores || "--"} 核 · ${number(data.host?.cpu_temperature_c, 1)}°C · Load ${number(data.host?.load_one, 2)}`);
   text("memoryState", Number.isFinite(memoryRatio) ? `${memoryRatio.toFixed(0)}%` : "--");
   text("hostMeta", `${number(usedMemory / 1024, 1)} / ${number(totalMemory / 1024, 1)} GB · Swap ${number(swapUsed / 1024, 1)} GB`);
-  text("gpuState", `${number(data.host?.gpu_usage_percent, 0)}%`);
-  text("gpuMeta", `${number(data.host?.gpu_frequency_mhz, 0)} MHz · ${number(data.host?.gpu_temperature_c, 1)}°C · 共享内存`);
+  const gpuAvailable = data.host?.gpu_available === true;
+  text("gpuState", gpuAvailable ? `${number(data.host?.gpu_usage_percent, 0)}%` : "N/A");
+  text("gpuMeta", gpuAvailable
+    ? `${number(data.host?.gpu_frequency_mhz, 0)} MHz · ${number(data.host?.gpu_temperature_c, 1)}°C · ${data.host?.gpu_memory_mode || "unknown"}`
+    : "当前平台未提供 GPU 指标");
   setMetricTooltip("observationState", "Observation / 观测输入", [
     `状态：${$("observationState").textContent}`,
     `说明：${$("observationMeta").textContent}`,
@@ -192,20 +231,24 @@ function render(data) {
     `使用率：${Number.isFinite(memoryRatio) ? memoryRatio.toFixed(0) : "--"}%`,
     `已用 / 总量：${number(usedMemory / 1024, 1)} / ${number(totalMemory / 1024, 1)} GB`,
     `Swap 已用：${number(swapUsed / 1024, 1)} GB`,
-    "说明：Jetson CPU 与 GPU 共享统一内存"
+    `GPU 内存模式：${data.host?.gpu_memory_mode || "unknown"}`
   ]);
   setMetricTooltip("gpuState", "图形处理器 GPU", [
-    `使用率：${number(data.host?.gpu_usage_percent, 0)}%`,
-    `频率：${number(data.host?.gpu_frequency_mhz, 0)} MHz`,
-    `温度：${number(data.host?.gpu_temperature_c, 1)}°C`,
-    "显存模式：与系统共享统一内存"
+    `可用：${gpuAvailable ? "是" : "否"}`,
+    `指标后端：${data.host?.gpu_backend || "unavailable"}`,
+    `使用率：${gpuAvailable ? `${number(data.host?.gpu_usage_percent, 0)}%` : "N/A"}`,
+    `频率：${gpuAvailable ? `${number(data.host?.gpu_frequency_mhz, 0)} MHz` : "N/A"}`,
+    `温度：${gpuAvailable ? `${number(data.host?.gpu_temperature_c, 1)}°C` : "N/A"}`,
+    `显存模式：${data.host?.gpu_memory_mode || "unknown"}`
   ]);
   text("cameraResolution", `${data.observation?.image_width || "--"} × ${data.observation?.image_height || "--"}`);
   text("cameraAge", data.camera?.age_ms >= 0 ? `更新 ${number(data.camera.age_ms / 1000, 1)}s 前` : "更新时间 --");
   text("calibrationState", data.observation?.camera_calibrated ? "已标定" : "未标定");
   const cameraReceived = Boolean(data.camera?.received);
+  const cameraContentValid = !data.camera?.content_analyzed || data.camera?.content_valid;
   state.cameraStatus = data.camera || null;
-  badge($("cameraBadge"), Boolean(data.camera?.fresh), "实时快照", cameraReceived ? "画面停滞" : "无画面");
+  badge($("cameraBadge"), Boolean(data.camera?.fresh && cameraContentValid), "实时快照",
+    data.camera?.content_analyzed && !data.camera?.content_valid ? "黑帧异常" : (cameraReceived ? "画面停滞" : "无画面"));
   renderCameraView(data.camera, {
     image: "cameraImage", empty: "cameraEmpty", overlay: "cameraLiveOverlay",
     label: "cameraLiveLabel", time: "cameraFrameTime", sequence: "cameraFrameSequence"
@@ -479,6 +522,26 @@ async function convertDataset(item) {
   try {
     const result = await jobFetch("/api/jobs");
     state.jobs = result.jobs || [];
+    const runningSwitch = state.jobs.find((job) => job.job_type === "policy.runtime_switch" && ["queued", "running"].includes(job.state));
+    if (!state.runtimeSwitchJobId && runningSwitch) {
+      state.runtimeSwitchJobId = runningSwitch.id;
+      state.runtimeSwitchTarget = runningSwitch.parameters?.provider || "";
+      state.runtimeSwitchNotified = false;
+    }
+    if (state.runtimeSwitchJobId) {
+      const switchJob = state.jobs.find((job) => job.id === state.runtimeSwitchJobId);
+      if (switchJob && ["succeeded", "failed", "cancelled"].includes(switchJob.state)) {
+        if (!state.runtimeSwitchNotified) {
+          toast(switchJob.state === "succeeded"
+            ? `Policy Runtime 已切换到 ${switchJob.parameters?.provider === "smolvla" ? "SmolVLA" : "Mock"}`
+            : "Policy Runtime 切换失败，已尝试回滚到 Mock；请查看任务日志", switchJob.state !== "succeeded");
+          state.runtimeSwitchNotified = true;
+        }
+        state.runtimeSwitchJobId = "";
+        state.runtimeSwitchTarget = "";
+      }
+    }
+    updatePolicyRuntimeCard();
     await refreshDatasetFailureLog();
     const catalog = state.datasetCatalog || { episodes: [], exports: [], lerobot: [], archives: [] };
     renderDatasetWorkflow(catalog.episodes, catalog.exports, catalog.lerobot, catalog.archives);
@@ -508,7 +571,7 @@ async function refreshSelectedJob(showError = false) {
     $("selectedJobState").className = `job-state ${job.state}`;
     $("selectedJobState").textContent = stateLabel(job.state);
     $("jobLog").textContent = log || "任务尚未产生输出。";
-    $("cancelJob").disabled = !["queued", "running"].includes(job.state);
+    $("cancelJob").disabled = job.job_type === "policy.runtime_switch" || !["queued", "running"].includes(job.state);
   } catch (error) {
     if (showError) toast(error.message, true);
   }
@@ -539,6 +602,28 @@ $("jobForm").addEventListener("submit", async (event) => {
 document.querySelectorAll("[data-policy-job]").forEach((button) => button.addEventListener("click", async () => {
   try { await createJob(button.dataset.policyJob); }
   catch (error) { toast(error.message, true); if (!state.token) openToken(); }
+}));
+async function switchPolicyRuntime(provider) {
+  if (!state.token) { openToken(); throw new Error("请先填写操作令牌"); }
+  if (state.systemMode !== "VLA_SHADOW") throw new Error("请先进入 VLA_SHADOW 模式");
+  const displayName = provider === "smolvla" ? "SmolVLA" : "Mock";
+  if (!confirm(`确认切换到 ${displayName} Runtime？
+
+切换期间 Shadow 推理会短暂中断；SmolVLA 启动失败时会自动回滚 Mock。`)) return;
+  const job = await jobFetch("/api/jobs", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ job_type: "policy.runtime_switch", parameters: { provider } })
+  });
+  state.runtimeSwitchJobId = job.id;
+  state.runtimeSwitchTarget = provider;
+  state.runtimeSwitchNotified = false;
+  state.selectedJobId = job.id;
+  updatePolicyRuntimeCard();
+  toast(`已提交 ${displayName} Runtime 切换任务`);
+  await refreshJobs(true);
+}
+document.querySelectorAll("[data-runtime-provider]").forEach((button) => button.addEventListener("click", () => {
+  switchPolicyRuntime(button.dataset.runtimeProvider).catch((error) => toast(error.message, true));
 }));
 $("refreshJobs").addEventListener("click", () => refreshJobs(true));
 $("cancelJob").addEventListener("click", async () => {
@@ -1006,7 +1091,7 @@ function renderDebugResult(result) {
   $("debugJson").textContent = JSON.stringify(result, null, 2);
   $("copyDebugJson").disabled = false;
   text("debugProvider", `${result.provider_id || "--"} / ${result.model_id || "--"}`);
-  text("debugLatency", `${number(result.latency_ms?.total, 1)} ms`);
+  text("debugLatency", `${milliseconds(result.latency_ms?.total)} ms`);
   const normalized = result.raw_output?.normalized_action_chunk;
   const denormalized = result.raw_output?.denormalized_actions?.values || [];
   const interpreted = result.interpreted_output?.twist_actions || [];
@@ -1058,6 +1143,9 @@ async function captureDebugObservation() {
   clearDebugError();
   if (state.systemMode !== "VLA_SHADOW") {
     throw new Error(`当前为 ${state.systemMode || "UNKNOWN"} 模式，请先点击“进入影子调试模式”`);
+  }
+  if (state.debugInputSource === "camera" && state.cameraStatus?.content_analyzed && !state.cameraStatus?.content_valid) {
+    throw new Error("前视相机正在持续输出近乎全黑的画面，请检查镜头遮挡、USB 连接，或在组件控制中重启前视相机");
   }
   if (!state.token) { openToken(); throw new Error("请先填写操作令牌"); }
   setDebugBusy(true); setDebugStage("capture", "采集中");
@@ -1129,12 +1217,15 @@ function renderComponents() {
     return;
   }
   state.components.forEach((component) => {
-    const label = componentLabel(component.state);
+    const blackCamera = component.component_id === "front_camera" &&
+      state.cameraStatus?.content_analyzed && !state.cameraStatus?.content_valid && component.state === "running";
+    const effectiveState = blackCamera ? "degraded" : component.state;
+    const label = componentLabel(effectiveState);
     const card = document.createElement("article");
     card.className = "component-card";
-    card.innerHTML = `<div class="component-card-head"><h3>${component.display_name}<small>${component.component_id}</small></h3><span class="component-state ${component.state}">${label[0]} · ${label[1]}</span></div>
+    card.innerHTML = `<div class="component-card-head"><h3>${component.display_name}<small>${component.component_id}</small></h3><span class="component-state ${effectiveState}">${label[0]} · ${label[1]}</span></div>
       <div class="component-meta"><div><small>进程 PID</small><strong>${component.pid || "--"}</strong></div><div><small>运行时间</small><strong>${component.uptime_seconds > 0 ? `${number(component.uptime_seconds, 0)} s` : "--"}</strong></div><div><small>组件分组</small><strong>${component.group_name || "--"}</strong></div></div>
-      <p class="component-message">${componentDescription(component)}</p><p class="component-dependencies">依赖：${component.dependencies?.length ? component.dependencies.join(" → ") : "无"}</p>
+      <p class="component-message">${blackCamera ? `进程和 Topic 正常，但图像内容近乎全黑（平均亮度 ${number(state.cameraStatus?.mean_intensity, 2)}）。请检查镜头遮挡、USB 连接或重启相机。` : componentDescription(component)}</p><p class="component-dependencies">依赖：${component.dependencies?.length ? component.dependencies.join(" → ") : "无"}</p>
       <div class="component-actions"><button class="button primary" data-component-action="start" ${component.can_start ? "" : "disabled"}>启动</button><button class="button secondary" data-component-action="stop" title="仅停止当前组件" ${component.can_stop ? "" : "disabled"}>停止</button><button class="button secondary" data-component-action="restart" ${component.can_restart ? "" : "disabled"}>重启</button><button class="button ghost" data-component-log>日志</button></div>`;
     card.querySelectorAll("[data-component-action]").forEach((button) => button.addEventListener("click", () => controlComponent(component.component_id, button.dataset.componentAction)));
     card.querySelector("[data-component-log]").addEventListener("click", () => loadComponentLog(component.component_id, component.display_name));

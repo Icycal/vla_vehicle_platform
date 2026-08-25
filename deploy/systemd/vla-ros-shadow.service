@@ -6,13 +6,14 @@ Requires=vla-policy-runtime.service
 
 [Service]
 Type=simple
-User=wheeltec
-Group=wheeltec
-SupplementaryGroups=video dialout
-EnvironmentFile=-/etc/vla-vehicle/vehicle.env
-WorkingDirectory=/var/lib/vla-vehicle
-ExecStartPre=/usr/bin/test -L /opt/vla-vehicle/current
-ExecStart=/opt/vla-vehicle/current/bin/run_ros_shadow.sh
+User=@VLA_SERVICE_USER@
+Group=@VLA_SERVICE_GROUP@
+SupplementaryGroups=@VLA_ROS_GROUPS@
+EnvironmentFile=-@VLA_ETC_ROOT@/vehicle.env
+Environment=VLA_ENV_FILE=@VLA_ETC_ROOT@/vehicle.env
+WorkingDirectory=@VLA_VAR_ROOT@
+ExecStartPre=/usr/bin/test -L @VLA_OPT_ROOT@/current
+ExecStart=@VLA_OPT_ROOT@/current/bin/run_ros_shadow.sh
 Restart=on-failure
 RestartSec=3
 TimeoutStopSec=30

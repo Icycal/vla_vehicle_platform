@@ -7,15 +7,10 @@ VAR_ROOT="${VLA_VAR_ROOT:-/var/lib/vla-vehicle}"
 LOG_ROOT="${VLA_LOG_ROOT:-/var/log/vla-vehicle}"
 SYSTEMD_ROOT="${VLA_SYSTEMD_ROOT:-/etc/systemd/system}"
 SKIP_SYSTEMD="${VLA_SKIP_SYSTEMD:-0}"
-
-if [[ "$(readlink -f "$0")" == "/usr/local/sbin/vla-install-release" ]]; then
-  OPT_ROOT=/opt/vla-vehicle
-  ETC_ROOT=/etc/vla-vehicle
-  VAR_ROOT=/var/lib/vla-vehicle
-  LOG_ROOT=/var/log/vla-vehicle
-  SYSTEMD_ROOT=/etc/systemd/system
-  SKIP_SYSTEMD=0
-fi
+SERVICE_USER="${VLA_SERVICE_USER:-${SUDO_USER:-}}"
+SERVICE_GROUP="${VLA_SERVICE_GROUP:-}"
+ROS_GROUPS="${VLA_ROS_GROUPS:-video dialout}"
+POLICY_GROUPS="${VLA_POLICY_GROUPS:-docker}"
 
 archive=""
 policy_image_archive=""
@@ -31,6 +26,8 @@ Options:
   --activate             Activate the installed version.
   --enable-services      Enable and start production services.
   --no-systemd           Do not install or reload systemd units.
+  --service-user USER    User that runs production services.
+  --service-group GROUP  Primary group for production services.
 EOF
 }
 
@@ -41,6 +38,8 @@ while [[ $# -gt 0 ]]; do
     --activate) activate=true; shift ;;
     --enable-services) enable_services=true; activate=true; shift ;;
     --no-systemd) SKIP_SYSTEMD=1; shift ;;
+    --service-user) SERVICE_USER="${2:?}"; shift 2 ;;
+    --service-group) SERVICE_GROUP="${2:?}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -65,6 +64,43 @@ if [[ "${OPT_ROOT}" == "/opt/vla-vehicle" && "$(id -u)" -ne 0 ]]; then
   exit 1
 fi
 
+if [[ -n "${SERVICE_USER}" ]]; then
+  if ! id "${SERVICE_USER}" >/dev/null 2>&1; then
+    echo "A valid service user is required. Use --service-user or VLA_SERVICE_USER." >&2
+    exit 1
+  fi
+  if [[ -z "${SERVICE_GROUP}" ]]; then
+    SERVICE_GROUP="$(id -gn "${SERVICE_USER}")"
+  fi
+  if ! getent group "${SERVICE_GROUP}" >/dev/null 2>&1; then
+    echo "Service group does not exist: ${SERVICE_GROUP}" >&2
+    exit 1
+  fi
+fi
+if [[ "${SKIP_SYSTEMD}" != "1" && -z "${SERVICE_USER}" ]]; then
+  echo "A valid service user is required. Use --service-user or VLA_SERVICE_USER." >&2
+  exit 1
+fi
+if [[ "${SKIP_SYSTEMD}" == "1" && "${enable_services}" == "true" ]]; then
+  echo "--enable-services cannot be combined with --no-systemd." >&2
+  exit 2
+fi
+
+existing_groups() {
+  local configured_groups="$1"
+  local result=()
+  local group
+  for group in ${configured_groups}; do
+    if getent group "${group}" >/dev/null 2>&1; then
+      result+=("${group}")
+    fi
+  done
+  printf '%s' "${result[*]}"
+}
+
+ROS_GROUPS="$(existing_groups "${ROS_GROUPS}")"
+POLICY_GROUPS="$(existing_groups "${POLICY_GROUPS}")"
+
 verify_sidecar() {
   local file="$1"
   local sidecar="${file}.sha256"
@@ -74,6 +110,10 @@ verify_sidecar() {
       sha256sum --check "$(basename "${sidecar}")"
     )
   fi
+}
+
+escape_sed_replacement() {
+  printf '%s' "$1" | sed 's/[\\&|]/\\&/g'
 }
 
 verify_sidecar "${archive}"
@@ -198,22 +238,46 @@ fi
 
 mv "${bundle_root}" "${release_dir}"
 
+etc_root_escaped="$(escape_sed_replacement "${ETC_ROOT}")"
+var_root_escaped="$(escape_sed_replacement "${VAR_ROOT}")"
+log_root_escaped="$(escape_sed_replacement "${LOG_ROOT}")"
 for default_file in "${release_dir}/config/defaults/"*; do
   file_name="$(basename "${default_file}")"
-  cp -a "${default_file}" "${ETC_ROOT}/${file_name}.dist"
+  sed \
+    -e "s|@VLA_ETC_ROOT@|${etc_root_escaped}|g" \
+    -e "s|@VLA_VAR_ROOT@|${var_root_escaped}|g" \
+    -e "s|@VLA_LOG_ROOT@|${log_root_escaped}|g" \
+    "${default_file}" > "${ETC_ROOT}/${file_name}.dist"
   if [[ ! -e "${ETC_ROOT}/${file_name}" ]]; then
-    cp -a "${default_file}" "${ETC_ROOT}/${file_name}"
+    cp -a "${ETC_ROOT}/${file_name}.dist" "${ETC_ROOT}/${file_name}"
   fi
 done
 
-if [[ "$(id -u)" -eq 0 ]] && id wheeltec >/dev/null 2>&1; then
-  chown -R wheeltec:wheeltec "${VAR_ROOT}" "${LOG_ROOT}"
+if [[ "$(id -u)" -eq 0 && -n "${SERVICE_USER}" ]]; then
+  chown -R "${SERVICE_USER}:${SERVICE_GROUP}" "${VAR_ROOT}" "${LOG_ROOT}"
   chown root:root "${ETC_ROOT}"/* 2>/dev/null || true
   chmod -R go-w "${release_dir}"
 fi
 
 if [[ "${SKIP_SYSTEMD}" != "1" ]]; then
-  cp -a "${release_dir}/systemd/"*.service "${SYSTEMD_ROOT}/"
+  opt_root_escaped="$(escape_sed_replacement "${OPT_ROOT}")"
+  service_user_escaped="$(escape_sed_replacement "${SERVICE_USER}")"
+  service_group_escaped="$(escape_sed_replacement "${SERVICE_GROUP}")"
+  ros_groups_escaped="$(escape_sed_replacement "${ROS_GROUPS}")"
+  policy_groups_escaped="$(escape_sed_replacement "${POLICY_GROUPS}")"
+  for template in "${release_dir}/systemd/"*.service; do
+    unit_path="${SYSTEMD_ROOT}/$(basename "${template}")"
+    sed \
+      -e "s|@VLA_OPT_ROOT@|${opt_root_escaped}|g" \
+      -e "s|@VLA_ETC_ROOT@|${etc_root_escaped}|g" \
+      -e "s|@VLA_VAR_ROOT@|${var_root_escaped}|g" \
+      -e "s|@VLA_SERVICE_USER@|${service_user_escaped}|g" \
+      -e "s|@VLA_SERVICE_GROUP@|${service_group_escaped}|g" \
+      -e "s|@VLA_ROS_GROUPS@|${ros_groups_escaped}|g" \
+      -e "s|@VLA_POLICY_GROUPS@|${policy_groups_escaped}|g" \
+      "${template}" > "${unit_path}"
+    chmod 0644 "${unit_path}"
+  done
   systemctl daemon-reload
 fi
 

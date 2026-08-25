@@ -4,7 +4,7 @@ set -eo pipefail
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 EPISODE_ID="${1:-}"
 TASK="${2:-camera shadow capture}"
-OPERATOR_ID="${3:-wheeltec}"
+OPERATOR_ID="${3:-${USER:-unknown}}"
 
 source "${PROJECT_ROOT}/scripts/ensure_vla_environment.sh" 43 "$@"
 

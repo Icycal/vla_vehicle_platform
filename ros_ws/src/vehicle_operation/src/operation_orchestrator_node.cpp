@@ -104,6 +104,15 @@ std::string trim(std::string value)
   const auto last = value.find_last_not_of(" \t\r\n");
   return value.substr(first, last - first + 1);
 }
+
+bool path_is_within(
+  const std::filesystem::path & root,
+  const std::filesystem::path & candidate)
+{
+  const auto relative = candidate.lexically_relative(root);
+  return !relative.empty() && !relative.is_absolute() &&
+         *relative.begin() != "..";
+}
 }  // namespace
 
 class OperationOrchestrator : public rclcpp::Node
@@ -215,6 +224,20 @@ private:
 
   void load_configuration()
   {
+    const auto configured_log_root = declare_parameter<std::string>("log_root", "");
+    if (configured_log_root.empty()) {
+      throw std::invalid_argument("log_root must be configured");
+    }
+    std::error_code path_error;
+    std::filesystem::create_directories(configured_log_root, path_error);
+    if (path_error) {
+      throw std::invalid_argument("Unable to create configured log_root");
+    }
+    log_root_ = std::filesystem::weakly_canonical(configured_log_root, path_error);
+    if (path_error) {
+      throw std::invalid_argument("Unable to resolve configured log_root");
+    }
+
     component_order_ = declare_parameter<std::vector<std::string>>("component_ids", std::vector<std::string>{});
     if (component_order_.empty()) {throw std::invalid_argument("component_ids must not be empty");}
     for (const auto & id : component_order_) {
@@ -224,11 +247,20 @@ private:
       definition.display_name = declare_parameter<std::string>(prefix + "display_name", id);
       definition.group_name = declare_parameter<std::string>(prefix + "group_name", "other");
       definition.unit = declare_parameter<std::string>(prefix + "unit", "");
-      definition.log_path = declare_parameter<std::string>(prefix + "log_path", "");
+      const auto configured_log_path = declare_parameter<std::string>(prefix + "log_path", "");
+      const auto candidate_log_path = std::filesystem::path(configured_log_path).is_absolute() ?
+        std::filesystem::path(configured_log_path) : log_root_ / configured_log_path;
+      path_error.clear();
+      const auto resolved_log_path = std::filesystem::weakly_canonical(
+        candidate_log_path, path_error);
+      if (path_error || !path_is_within(log_root_, resolved_log_path)) {
+        throw std::invalid_argument("Invalid log path for component " + id);
+      }
+      definition.log_path = resolved_log_path.string();
       definition.dependencies = declare_parameter<std::vector<std::string>>(prefix + "dependencies", std::vector<std::string>{});
       definition.expected_nodes = declare_parameter<std::vector<std::string>>(prefix + "expected_nodes", std::vector<std::string>{});
       definition.health_topics = declare_parameter<std::vector<std::string>>(prefix + "health_topics", std::vector<std::string>{});
-      if (definition.unit.empty() || definition.log_path.empty() || definition.log_path.rfind("/home/wheeltec/vla_vehicle_platform/run/log/components/", 0) != 0 || definition.unit.find_first_not_of(
+      if (definition.unit.empty() || configured_log_path.empty() || definition.unit.find_first_not_of(
           "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@_.-") != std::string::npos)
       {
         throw std::invalid_argument("Invalid systemd unit for component " + id);
@@ -389,6 +421,7 @@ private:
   std::unordered_map<std::string, ComponentDefinition> components_;
   std::unordered_map<std::string, std::vector<std::string>> profiles_;
   std::unordered_map<std::string, vehicle_interfaces::msg::ComponentState> states_;
+  std::filesystem::path log_root_;
   std::mutex state_mutex_;
   std::mutex control_mutex_;
   std::mutex recent_stop_mutex_;

@@ -1,6 +1,6 @@
 storage_manager:
   ros__parameters:
-    project_root: /home/wheeltec/vla_vehicle_platform
+    project_root: ""
     warning_used_percent: 80.0
     critical_used_percent: 90.0
     category_ids: [episodes, training_datasets, exports, debug_runs, jobs, component_logs, build_logs, test_artifacts, training_runs, model_assets]

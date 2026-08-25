@@ -4,11 +4,14 @@ After=vla-front-camera.service vla-runtime-core.service
 Wants=vla-front-camera.service vla-runtime-core.service
 [Service]
 Type=simple
-WorkingDirectory=/home/wheeltec/vla_vehicle_platform
+WorkingDirectory=@VLA_PROJECT_ROOT@
 Environment=ROS_DOMAIN_ID=43
-ExecStart=/home/wheeltec/vla_vehicle_platform/scripts/run_managed_component.sh observation_pipeline
-StandardOutput=append:/home/wheeltec/vla_vehicle_platform/run/log/components/observation_pipeline.log
-StandardError=append:/home/wheeltec/vla_vehicle_platform/run/log/components/observation_pipeline.log
+Environment=VLA_STATE_ROOT=@VLA_STATE_ROOT@
+Environment=VLA_RUNTIME_ROOT=@VLA_RUNTIME_ROOT@
+Environment=VLA_LOG_ROOT=@VLA_LOG_ROOT@
+ExecStart=@VLA_PROJECT_ROOT@/scripts/run_managed_component.sh observation_pipeline
+StandardOutput=append:@VLA_LOG_ROOT@/components/observation_pipeline.log
+StandardError=append:@VLA_LOG_ROOT@/components/observation_pipeline.log
 Restart=on-failure
 RestartSec=2
 KillMode=mixed

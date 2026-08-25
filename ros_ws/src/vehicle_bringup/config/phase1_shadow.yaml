@@ -8,6 +8,11 @@ observation_monitor:
     require_odometry: false
     require_imu: false
     publish_frequency: 2.0
+    output_topic: /vehicle/observation_status
+    image_topic: /camera/image_raw
+    camera_info_topic: /camera/camera_info
+    odometry_topic: /odom
+    imu_topic: /imu/data_raw
 
 observation_adapter:
   ros__parameters:
@@ -15,6 +20,15 @@ observation_adapter:
     image_timeout: 0.5
     observation_validity: 0.5
     require_status_ready: true
+    base_frame: base_link
+    output_topic: /vla/observation
+    image_topic: /camera/image_compressed
+    status_topic: /vehicle/observation_status
+    odometry_topic: /odom
+    imu_topic: /imu/data_raw
+    command_topic: /cmd_vel
+    battery_topic: /PowerVoltage
+    task_topic: /vla/task
 
 shadow_evaluator:
   ros__parameters:
@@ -24,7 +38,7 @@ shadow_evaluator:
 
 episode_recorder:
   ros__parameters:
-    storage_root: "/home/wheeltec/vla_vehicle_platform/datasets/episodes"
+    storage_root: ""
     minimum_free_space_gb: 10.0
     max_episode_duration: 900.0
     image_record_frequency: 5.0
@@ -39,7 +53,7 @@ pipeline_trace_aggregator:
     shadow_stale_seconds: 5.0
 vla_debug_orchestrator:
   ros__parameters:
-    artifact_root: "/home/wheeltec/vla_vehicle_platform/run/ops/debug"
+    artifact_root: ""
     observation_timeout: 1.0
     command_timeout: 0.5
     stationary_linear_threshold: 0.02

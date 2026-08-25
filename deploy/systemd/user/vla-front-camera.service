@@ -3,11 +3,14 @@ Description=VLA Front Camera
 After=network.target
 [Service]
 Type=simple
-WorkingDirectory=/home/wheeltec/vla_vehicle_platform
+WorkingDirectory=@VLA_PROJECT_ROOT@
 Environment=ROS_DOMAIN_ID=43
-ExecStart=/home/wheeltec/vla_vehicle_platform/scripts/run_managed_component.sh front_camera
-StandardOutput=append:/home/wheeltec/vla_vehicle_platform/run/log/components/front_camera.log
-StandardError=append:/home/wheeltec/vla_vehicle_platform/run/log/components/front_camera.log
+Environment=VLA_STATE_ROOT=@VLA_STATE_ROOT@
+Environment=VLA_RUNTIME_ROOT=@VLA_RUNTIME_ROOT@
+Environment=VLA_LOG_ROOT=@VLA_LOG_ROOT@
+ExecStart=@VLA_PROJECT_ROOT@/scripts/run_managed_component.sh front_camera
+StandardOutput=append:@VLA_LOG_ROOT@/components/front_camera.log
+StandardError=append:@VLA_LOG_ROOT@/components/front_camera.log
 Restart=on-failure
 RestartSec=2
 KillMode=mixed

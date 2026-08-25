@@ -2,8 +2,9 @@
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "${PROJECT_ROOT}/scripts/lib/runtime_paths.sh"
 RUNTIME_ROOT="${PROJECT_ROOT}/policy-runtime"
-SOCKET_PATH="${POLICY_SOCKET_PATH:-${PROJECT_ROOT}/run/policy/policy.sock}"
+SOCKET_PATH="${POLICY_SOCKET_PATH:-${VLA_POLICY_SOCKET}}"
 
 mkdir -p "$(dirname "${SOCKET_PATH}")"
 "${RUNTIME_ROOT}/scripts/generate_protocol.sh"

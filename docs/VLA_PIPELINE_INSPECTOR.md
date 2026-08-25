@@ -177,6 +177,8 @@ smolvla-shadow-zero-v1
 
 2026-08-10 在 Orin NX 16GB 上的真实单帧验证约为 1 秒总耗时；延迟会受功耗模式、GPU 时钟、后台 Shadow 请求、温度和首次运行缓存影响。
 
+Mock Provider 同样使用单调高精度时钟记录实际内部处理时间，不再返回固定的 `0.0`。由于 Mock 处理通常小于 `0.1 ms`，页面会自动使用三位小数展示；该数值只代表 Provider 内部处理时间，不包含浏览器、HTTP、ROS Service 和 Unix Socket 往返时间。
+
 ## 6. 工件目录
 
 每次冻结创建：
@@ -349,3 +351,11 @@ docker logs --tail 100 vla-smolvla-runtime
 ### 页面返回 401
 
 重新从 `run/config/vehicle_ops.env` 获取 Token，并在右上角令牌面板更新。不要把 Token 放入 URL、文档或 Git。
+
+## 12. 网页切换 Policy Runtime
+
+快照调试页面支持在 Mock 与 SmolVLA Runtime 之间切换。切换通过后端白名单 Job 执行，仅在 `VLA_SHADOW`、无主动调试会话、未录制 Episode 且车辆命令静止时允许。切换脚本会停止旧 Runtime、启动目标容器并等待 Docker 健康检查；SmolVLA 启动失败时自动回滚到 Mock。
+
+## 13. 黑帧诊断
+
+Vehicle Ops 同时订阅 `/camera/image_raw` 并抽样计算平均亮度。相机进程和 Topic 即使持续存在，只要图像平均亮度低于阈值，页面就会标记“黑帧异常”，组件卡片显示降级，并阻止使用当前相机帧创建调试快照。上传图片调试不受此限制。黑帧通常需要检查镜头遮挡、USB 连接、相机供电或执行前视相机重启。

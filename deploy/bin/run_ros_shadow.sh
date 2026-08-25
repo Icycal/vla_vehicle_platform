@@ -15,7 +15,7 @@ export RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION:-rmw_cyclonedds_cpp}"
 export VLA_CONFIG_ROOT="${VLA_CONFIG_ROOT:-/etc/vla-vehicle}"
 export VLA_STATE_ROOT="${VLA_STATE_ROOT:-/var/lib/vla-vehicle}"
 
-source /opt/ros/humble/setup.bash
+source "${ROS_SETUP_FILE:-/opt/ros/${ROS_DISTRO:-humble}/setup.bash}"
 source "${RELEASE_ROOT}/ros/install/local_setup.bash"
 
 exec ros2 launch vehicle_bringup phase1_shadow.launch.xml \

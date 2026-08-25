@@ -2,9 +2,11 @@
 set -euo pipefail
 
 PROJECT_ROOT="$({ cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd; })"
+source "${PROJECT_ROOT}/scripts/lib/runtime_paths.sh"
 RUNTIME_CONFIG="${VEHICLE_OPS_ENV_FILE:-${PROJECT_ROOT}/run/config/vehicle_ops.env}"
 
 source "${PROJECT_ROOT}/scripts/ensure_vla_environment.sh" 43 "$@"
+prepare_vla_runtime_paths
 
 if [[ ! -f "${RUNTIME_CONFIG}" ]]; then
   mkdir -p "$(dirname "${RUNTIME_CONFIG}")"
@@ -17,7 +19,7 @@ if [[ ! -f "${RUNTIME_CONFIG}" ]]; then
 VEHICLE_OPS_BIND_ADDRESS=0.0.0.0
 VEHICLE_OPS_PORT=8088
 VEHICLE_OPS_OPERATOR_TOKEN=${generated_token}
-VEHICLE_OPS_JOBS_ROOT=${PROJECT_ROOT}/run/ops/jobs
+VEHICLE_OPS_JOBS_ROOT=${VLA_JOBS_ROOT}
 EOF
   chmod 600 "${RUNTIME_CONFIG}"
   echo "Created runtime configuration: ${RUNTIME_CONFIG}"
@@ -30,7 +32,7 @@ set +a
 : "${VEHICLE_OPS_BIND_ADDRESS:=0.0.0.0}"
 : "${VEHICLE_OPS_PORT:=8088}"
 : "${VEHICLE_OPS_OPERATOR_TOKEN:?VEHICLE_OPS_OPERATOR_TOKEN is required}"
-: "${VEHICLE_OPS_JOBS_ROOT:=${PROJECT_ROOT}/run/ops/jobs}"
+: "${VEHICLE_OPS_JOBS_ROOT:=${VLA_JOBS_ROOT}}"
 
 declare -A seen_ips=()
 vehicle_ips=()
@@ -55,5 +57,7 @@ exec ros2 launch vehicle_ops vehicle_ops.launch.xml \
   port:="${VEHICLE_OPS_PORT}" \
   operator_token:="${VEHICLE_OPS_OPERATOR_TOKEN}" \
   project_root:="${PROJECT_ROOT}" \
+  state_root:="${VLA_STATE_ROOT}" \
+  log_root:="${VLA_LOG_ROOT}" \
   jobs_root:="${VEHICLE_OPS_JOBS_ROOT}" \
   "$@"

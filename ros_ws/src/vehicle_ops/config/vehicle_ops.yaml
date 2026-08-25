@@ -6,6 +6,10 @@ vehicle_ops_api:
     service_timeout_seconds: 2.0
     stale_after_seconds: 3.0
     debug_timeout_seconds: 45.0
+    camera_dark_mean_threshold: 2.0
+    runtime_switch_command_timeout_seconds: 0.5
+    runtime_switch_stationary_linear_threshold: 0.02
+    runtime_switch_stationary_angular_threshold: 0.05
     operator_token: ""
-    project_root: /home/wheeltec/vla_vehicle_platform
-    jobs_root: /home/wheeltec/vla_vehicle_platform/run/ops/jobs
+    project_root: ""
+    jobs_root: ""

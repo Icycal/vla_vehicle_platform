@@ -14,6 +14,7 @@
 #include <iterator>
 #include <memory>
 #include <mutex>
+#include <stdexcept>
 #include <string>
 #include <system_error>
 #include <unordered_map>
@@ -85,8 +86,11 @@ public:
   StorageManager()
   : Node("storage_manager")
   {
-    project_root_ = fs::path(declare_parameter<std::string>(
-      "project_root", "/home/wheeltec/vla_vehicle_platform"));
+    const auto project_root = declare_parameter<std::string>("project_root", "");
+    if (project_root.empty()) {
+      throw std::invalid_argument("project_root must be configured");
+    }
+    project_root_ = fs::path(project_root);
     warning_used_percent_ = declare_parameter<double>("warning_used_percent", 80.0);
     critical_used_percent_ = declare_parameter<double>("critical_used_percent", 90.0);
     const auto category_ids = declare_parameter<std::vector<std::string>>(

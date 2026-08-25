@@ -53,22 +53,22 @@ require_setup() {
 load_profile() {
   local profile="$1"
 
-  require_setup /opt/ros/humble/setup.bash
+  require_setup "${ROS_SETUP_FILE:-/opt/ros/${ROS_DISTRO:-humble}/setup.bash}"
 
   case "${profile}" in
     base)
       ;;
     wheeltec)
-      require_setup /home/wheeltec/wheeltec_ros2/install/local_setup.bash
+      require_setup "${WHEELTEC_WS_ROOT:-${HOME}/wheeltec_ros2}/install/local_setup.bash"
       ;;
     autoware)
-      require_setup /home/wheeltec/wheeltec_ros2/install/local_setup.bash
-      require_setup /home/wheeltec/autoware/install/local_setup.bash
+      require_setup "${WHEELTEC_WS_ROOT:-${HOME}/wheeltec_ros2}/install/local_setup.bash"
+      require_setup "${AUTOWARE_WS_ROOT:-${HOME}/autoware}/install/local_setup.bash"
       ;;
     rhzd)
-      require_setup /home/wheeltec/wheeltec_ros2/install/local_setup.bash
-      require_setup /home/wheeltec/autoware/install/local_setup.bash
-      require_setup /home/wheeltec/workspace_rhzd/install/local_setup.bash
+      require_setup "${WHEELTEC_WS_ROOT:-${HOME}/wheeltec_ros2}/install/local_setup.bash"
+      require_setup "${AUTOWARE_WS_ROOT:-${HOME}/autoware}/install/local_setup.bash"
+      require_setup "${RHZD_WS_ROOT:-${HOME}/workspace_rhzd}/install/local_setup.bash"
       ;;
     vla)
       require_setup "${PROJECT_ROOT}/ros_ws/install/local_setup.bash"
@@ -95,8 +95,8 @@ if [[ "${1:-}" == "--internal" ]]; then
   export ROS_ENV_PROFILE="${profile}"
   export ROS_ENV_START_DIRECTORY="${start_directory}"
   export ROS_DOMAIN_ID="${domain_id}"
-  export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
-  export ROS_LOCALHOST_ONLY=0
+  export RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION:-rmw_cyclonedds_cpp}"
+  export ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY:-0}"
 
   cd "${start_directory}"
 
@@ -147,19 +147,28 @@ if [[ $# -gt 0 && "${1}" != "--" ]]; then
   exit 2
 fi
 
+clean_path="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+if [[ -d /usr/local/cuda/bin ]]; then
+  clean_path="/usr/local/cuda/bin:${clean_path}"
+fi
+
 CLEAN_ENV=(
   "HOME=${HOME}"
-  "USER=${USER:-wheeltec}"
-  "LOGNAME=${LOGNAME:-${USER:-wheeltec}}"
+  "USER=${USER:-$(id -un)}"
+  "LOGNAME=${LOGNAME:-${USER:-$(id -un)}}"
   "SHELL=/bin/bash"
-  "PATH=/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+  "PATH=${clean_path}"
   "LANG=${LANG:-C.UTF-8}"
   "ROS_ENV_PROJECT_ROOT=${PROJECT_ROOT}"
 )
 
 for variable_name in \
   TERM DISPLAY WAYLAND_DISPLAY XAUTHORITY XDG_RUNTIME_DIR \
-  DBUS_SESSION_BUS_ADDRESS SSH_AUTH_SOCK; do
+  DBUS_SESSION_BUS_ADDRESS SSH_AUTH_SOCK \
+  WHEELTEC_WS_ROOT AUTOWARE_WS_ROOT RHZD_WS_ROOT \
+  ROS_DISTRO ROS_SETUP_FILE RMW_IMPLEMENTATION ROS_LOCALHOST_ONLY \
+  VLA_HOME VLA_STATE_ROOT VLA_RUNTIME_ROOT VLA_LOG_ROOT \
+  VLA_POLICY_SOCKET VLA_EPISODE_ROOT VLA_DEBUG_ROOT VLA_JOBS_ROOT; do
   append_if_set "${variable_name}"
 done
 

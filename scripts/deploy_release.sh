@@ -7,7 +7,7 @@ INSTALLER="${SCRIPT_DIR}/install_release.sh"
 if [[ ! -f "${INSTALLER}" ]]; then
   INSTALLER="${PROJECT_ROOT}/scripts/install_release.sh"
 fi
-target="${VLA_DEPLOY_TARGET:-wheeltec@10.101.70.232}"
+target="${VLA_DEPLOY_TARGET:-}"
 archive=""
 policy_image=""
 non_interactive=false
@@ -33,6 +33,11 @@ while [[ $# -gt 0 ]]; do
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
 done
+
+if [[ -z "${target}" ]]; then
+  echo "Deployment target is required. Use --target USER@HOST or VLA_DEPLOY_TARGET." >&2
+  exit 2
+fi
 
 if [[ -z "${archive}" || ! -f "${archive}" ]]; then
   echo "Release archive not found: ${archive}" >&2

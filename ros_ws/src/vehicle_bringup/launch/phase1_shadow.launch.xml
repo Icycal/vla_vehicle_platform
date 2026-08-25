@@ -3,8 +3,12 @@
   <arg name="camera_params" default="$(find-pkg-share vehicle_bringup)/config/front_camera.yaml"/>
   <arg name="shadow_params" default="$(find-pkg-share vehicle_bringup)/config/phase1_shadow.yaml"/>
   <arg name="policy_params_file" default="$(find-pkg-share vehicle_bringup)/config/phase0.yaml"/>
+  <arg name="policy_socket_path" default="/run/vla-policy/policy.sock"/>
+  <arg name="episode_storage_root" default=""/>
+  <arg name="debug_artifact_root" default=""/>
   <include file="$(find-pkg-share vehicle_bringup)/launch/phase0.launch.xml">
     <arg name="policy_params_file" value="$(var policy_params_file)"/>
+    <arg name="policy_socket_path" value="$(var policy_socket_path)"/>
   </include>
   <include if="$(var enable_camera)" file="$(find-pkg-share vehicle_bringup)/launch/front_camera.launch.xml">
     <arg name="camera_params" value="$(var camera_params)"/>
@@ -15,8 +19,11 @@
   <include file="$(find-pkg-share vehicle_bringup)/launch/vla_debug_pipeline.launch.xml">
     <arg name="shadow_params" value="$(var shadow_params)"/>
     <arg name="policy_params_file" value="$(var policy_params_file)"/>
+    <arg name="policy_socket_path" value="$(var policy_socket_path)"/>
+    <arg name="debug_artifact_root" value="$(var debug_artifact_root)"/>
   </include>
   <include file="$(find-pkg-share vehicle_bringup)/launch/shadow_data.launch.xml">
     <arg name="shadow_params" value="$(var shadow_params)"/>
+    <arg name="episode_storage_root" value="$(var episode_storage_root)"/>
   </include>
 </launch>

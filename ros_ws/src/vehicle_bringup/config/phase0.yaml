@@ -4,7 +4,7 @@ vehicle_supervisor:
 vla_policy_gateway:
   ros__parameters:
     transport: mock
-    socket_path: "/home/wheeltec/vla_vehicle_platform/run/policy/policy.sock"
+    socket_path: "/run/vla-policy/policy.sock"
     transport_timeout: 1.0
     action_horizon: 8
     control_period_ms: 50
@@ -21,6 +21,12 @@ vla_control_mux:
   ros__parameters:
     source_timeout: 0.3
     publish_frequency: 20.0
+    output_frame: base_link
+    output_topic: /control/cmd_vel_selected
+    state_topic: /vehicle/system_state
+    nav_topic: /nav2/cmd_vel
+    vla_topic: /vla/cmd_vel_raw
+    mobile_topic: /mobile_teleop/cmd_vel
 
 vla_safety_guard:
   ros__parameters:
@@ -33,8 +39,12 @@ vla_safety_guard:
     obstacle_half_angle: 0.52
     require_scan: false
     publish_frequency: 20.0
+    output_topic: /cmd_vel
+    event_topic: /vla/safety_event
+    selected_command_topic: /control/cmd_vel_selected
+    scan_topic: /scan
 vla_debug_orchestrator:
   ros__parameters:
     transport: mock
-    socket_path: "/home/wheeltec/vla_vehicle_platform/run/policy/policy.sock"
+    socket_path: "/run/vla-policy/policy.sock"
     transport_timeout: 1.0

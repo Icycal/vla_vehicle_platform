@@ -39,8 +39,10 @@ public:
   EpisodeRecorder()
   : Node("episode_recorder")
   {
-    storage_root_ = declare_parameter<std::string>(
-      "storage_root", "/home/wheeltec/vla_vehicle_platform/datasets/episodes");
+    storage_root_ = declare_parameter<std::string>("storage_root", "");
+    if (storage_root_.empty()) {
+      throw std::invalid_argument("storage_root must be configured");
+    }
     minimum_free_space_gb_ = declare_parameter<double>("minimum_free_space_gb", 10.0);
     max_episode_duration_ = declare_parameter<double>("max_episode_duration", 900.0);
     image_record_frequency_ = declare_parameter<double>("image_record_frequency", 5.0);

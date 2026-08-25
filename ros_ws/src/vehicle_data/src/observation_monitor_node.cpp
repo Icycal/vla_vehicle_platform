@@ -29,26 +29,31 @@ public:
     require_odometry_ = declare_parameter<bool>("require_odometry", false);
     require_imu_ = declare_parameter<bool>("require_imu", false);
     const double publish_frequency = declare_parameter<double>("publish_frequency", 2.0);
+    const auto output_topic = declare_parameter<std::string>("output_topic", "/vehicle/observation_status");
+    const auto image_topic = declare_parameter<std::string>("image_topic", "/camera/image_raw");
+    const auto camera_info_topic = declare_parameter<std::string>("camera_info_topic", "/camera/camera_info");
+    const auto odometry_topic = declare_parameter<std::string>("odometry_topic", "/odom");
+    const auto imu_topic = declare_parameter<std::string>("imu_topic", "/imu/data_raw");
 
     publisher_ = create_publisher<vehicle_interfaces::msg::ObservationStatus>(
-      "/vehicle/observation_status", rclcpp::QoS(1).reliable().transient_local());
+      output_topic, rclcpp::QoS(1).reliable().transient_local());
     image_subscription_ = create_subscription<sensor_msgs::msg::Image>(
-      "/camera/image_raw", rclcpp::SensorDataQoS(),
+      image_topic, rclcpp::SensorDataQoS(),
       [this](sensor_msgs::msg::Image::SharedPtr message) {
         camera_stamp_ = now();
         image_width_ = message->width;
         image_height_ = message->height;
       });
     camera_info_subscription_ = create_subscription<sensor_msgs::msg::CameraInfo>(
-      "/camera/camera_info", rclcpp::SensorDataQoS(),
+      camera_info_topic, rclcpp::SensorDataQoS(),
       [this](sensor_msgs::msg::CameraInfo::SharedPtr message) {
         camera_calibrated_ = message->k[0] > 0.0 && message->k[4] > 0.0;
       });
     odometry_subscription_ = create_subscription<nav_msgs::msg::Odometry>(
-      "/odom", rclcpp::SensorDataQoS(),
+      odometry_topic, rclcpp::SensorDataQoS(),
       [this](nav_msgs::msg::Odometry::SharedPtr) {odometry_stamp_ = now();});
     imu_subscription_ = create_subscription<sensor_msgs::msg::Imu>(
-      "/imu/data_raw", rclcpp::SensorDataQoS(),
+      imu_topic, rclcpp::SensorDataQoS(),
       [this](sensor_msgs::msg::Imu::SharedPtr) {imu_stamp_ = now();});
 
     const auto period = std::chrono::duration<double>(

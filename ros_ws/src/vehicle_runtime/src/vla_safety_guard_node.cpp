@@ -27,12 +27,17 @@ public:
     obstacle_half_angle_ = declare_parameter<double>("obstacle_half_angle", 0.52);
     require_scan_ = declare_parameter<bool>("require_scan", false);
     const double publish_frequency = declare_parameter<double>("publish_frequency", 20.0);
+    const auto output_topic = declare_parameter<std::string>("output_topic", "/cmd_vel");
+    const auto event_topic = declare_parameter<std::string>("event_topic", "/vla/safety_event");
+    const auto selected_command_topic = declare_parameter<std::string>(
+      "selected_command_topic", "/control/cmd_vel_selected");
+    const auto scan_topic = declare_parameter<std::string>("scan_topic", "/scan");
 
-    command_publisher_ = create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
+    command_publisher_ = create_publisher<geometry_msgs::msg::Twist>(output_topic, 10);
     event_publisher_ = create_publisher<vehicle_interfaces::msg::SafetyEvent>(
-      "/vla/safety_event", rclcpp::QoS(10).reliable());
+      event_topic, rclcpp::QoS(10).reliable());
     command_subscription_ = create_subscription<geometry_msgs::msg::TwistStamped>(
-      "/control/cmd_vel_selected", 10,
+      selected_command_topic, 10,
       [this](geometry_msgs::msg::TwistStamped::SharedPtr message) {
         selected_command_ = message->twist;
         command_stamp_ = message->header.stamp;
@@ -41,7 +46,7 @@ public:
         }
       });
     scan_subscription_ = create_subscription<sensor_msgs::msg::LaserScan>(
-      "/scan", rclcpp::SensorDataQoS(),
+      scan_topic, rclcpp::SensorDataQoS(),
       std::bind(&VlaSafetyGuard::on_scan, this, std::placeholders::_1));
 
     const auto period = std::chrono::duration<double>(

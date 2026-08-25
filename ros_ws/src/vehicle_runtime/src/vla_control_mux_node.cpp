@@ -16,25 +16,33 @@ public:
   {
     timeout_seconds_ = declare_parameter<double>("source_timeout", 0.3);
     const double publish_frequency = declare_parameter<double>("publish_frequency", 20.0);
+    output_frame_ = declare_parameter<std::string>("output_frame", "base_link");
+    const auto output_topic = declare_parameter<std::string>(
+      "output_topic", "/control/cmd_vel_selected");
+    const auto state_topic = declare_parameter<std::string>("state_topic", "/vehicle/system_state");
+    const auto nav_topic = declare_parameter<std::string>("nav_topic", "/nav2/cmd_vel");
+    const auto vla_topic = declare_parameter<std::string>("vla_topic", "/vla/cmd_vel_raw");
+    const auto mobile_topic = declare_parameter<std::string>(
+      "mobile_topic", "/mobile_teleop/cmd_vel");
     publisher_ = create_publisher<geometry_msgs::msg::TwistStamped>(
-      "/control/cmd_vel_selected", 10);
+      output_topic, 10);
     state_subscription_ = create_subscription<vehicle_interfaces::msg::SystemState>(
-      "/vehicle/system_state", rclcpp::QoS(1).reliable().transient_local(),
+      state_topic, rclcpp::QoS(1).reliable().transient_local(),
       [this](vehicle_interfaces::msg::SystemState::SharedPtr message) {mode_ = message->mode;});
     nav_subscription_ = create_subscription<geometry_msgs::msg::Twist>(
-      "/nav2/cmd_vel", 10,
+      nav_topic, 10,
       [this](geometry_msgs::msg::Twist::SharedPtr message) {
         nav_command_ = *message;
         nav_stamp_ = now();
       });
     vla_subscription_ = create_subscription<geometry_msgs::msg::TwistStamped>(
-      "/vla/cmd_vel_raw", 10,
+      vla_topic, 10,
       [this](geometry_msgs::msg::TwistStamped::SharedPtr message) {
         vla_command_ = message->twist;
         vla_stamp_ = message->header.stamp;
       });
     mobile_subscription_ = create_subscription<geometry_msgs::msg::TwistStamped>(
-      "/mobile_teleop/cmd_vel", 10,
+      mobile_topic, 10,
       [this](geometry_msgs::msg::TwistStamped::SharedPtr message) {
         mobile_command_ = message->twist;
         mobile_stamp_ = message->header.stamp;
@@ -56,7 +64,7 @@ private:
   {
     geometry_msgs::msg::TwistStamped output;
     output.header.stamp = now();
-    output.header.frame_id = "base_link";
+    output.header.frame_id = output_frame_;
     if (mode_ == vehicle_interfaces::msg::SystemState::MODE_NAV2 && fresh(nav_stamp_)) {
       output.twist = nav_command_;
     } else if (
@@ -77,6 +85,7 @@ private:
 
   uint8_t mode_{vehicle_interfaces::msg::SystemState::MODE_MANUAL};
   double timeout_seconds_{0.3};
+  std::string output_frame_{"base_link"};
   geometry_msgs::msg::Twist nav_command_;
   geometry_msgs::msg::Twist vla_command_;
   geometry_msgs::msg::Twist mobile_command_;

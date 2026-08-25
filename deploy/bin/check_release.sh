@@ -2,19 +2,30 @@
 set -eo pipefail
 
 RELEASE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ENV_FILE="${VLA_ENV_FILE:-/etc/vla-vehicle/vehicle.env}"
+
+if [[ -f "${ENV_FILE}" ]]; then
+  set -a
+  source "${ENV_FILE}"
+  set +a
+fi
 
 (
   cd "${RELEASE_ROOT}"
   sha256sum --check --quiet checksums.sha256
 )
 
-source /opt/ros/humble/setup.bash
+source "${ROS_SETUP_FILE:-/opt/ros/${ROS_DISTRO:-humble}/setup.bash}"
 source "${RELEASE_ROOT}/ros/install/local_setup.bash"
 
 ros2 pkg prefix vehicle_bringup
 ros2 pkg prefix vehicle_runtime
 ros2 pkg prefix usb_cam
-ros2 pkg prefix turn_on_wheeltec_robot
+
+chassis_provider="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("chassis_provider", "wheeltec"))' "${RELEASE_ROOT}/manifest.json")"
+if [[ "${chassis_provider}" == "wheeltec" ]]; then
+  ros2 pkg prefix turn_on_wheeltec_robot
+fi
 
 VLA_STATE_ROOT="${VLA_STATE_ROOT:-/var/lib/vla-vehicle}" \
 VLA_POLICY_IMAGE="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["policy_image"])' "${RELEASE_ROOT}/manifest.json")" \

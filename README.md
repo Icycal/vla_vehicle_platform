@@ -24,13 +24,40 @@ build, launch, check, and episode scripts automatically re-enter the isolated `v
 `docs/ROS_ENVIRONMENTS.md` for profile composition, ROS Domain defaults, command mode, and optional
 aliases.
 
+## Relocatable development paths
+
+Development scripts derive the repository root from their own location; the checkout does not need
+to live under a particular user home directory. Runtime data locations can be overridden without
+editing ROS YAML files:
+
+```bash
+export VLA_STATE_ROOT=/srv/vla/state
+export VLA_RUNTIME_ROOT=/run/user/$(id -u)/vla-vehicle
+export VLA_LOG_ROOT=/srv/vla/log
+./scripts/run_phase1_shadow.sh
+```
+
+The derived defaults keep development data inside the checkout. `VLA_POLICY_SOCKET`,
+`VLA_EPISODE_ROOT`, `VLA_DEBUG_ROOT`, and `VLA_JOBS_ROOT` can override individual locations.
+`scripts/install_component_services.sh` renders user-systemd units with the current checkout and
+runtime paths instead of assuming a fixed username or directory.
+
 ## Production releases
 
-Production vehicles receive a merged ARM64 ROS install bundle and an exported OCI Policy Runtime
-image instead of the Git repository. Build a release on a dedicated Orin runner:
+Production vehicles receive a merged native-architecture ROS install bundle and an exported OCI
+Policy Runtime image instead of the Git repository. Build on the same CPU architecture as the
+target vehicle; an Orin runner produces `arm64` artifacts and an x86_64 runner produces `amd64`
+artifacts:
 
 ```bash
 ./scripts/build_release.sh --version 0.2.0
+```
+
+The default release includes the Wheeltec chassis package. Build a hardware-neutral platform
+bundle when the chassis driver is supplied separately:
+
+```bash
+./scripts/build_release.sh --version 0.2.0 --chassis-provider none
 ```
 
 Deploy it atomically to the vehicle after the one-time deployer bootstrap:

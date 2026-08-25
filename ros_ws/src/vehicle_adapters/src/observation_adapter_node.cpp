@@ -27,46 +27,55 @@ public:
     image_timeout_ = declare_parameter<double>("image_timeout", 0.5);
     observation_validity_ = declare_parameter<double>("observation_validity", 0.5);
     require_status_ready_ = declare_parameter<bool>("require_status_ready", true);
+    base_frame_ = declare_parameter<std::string>("base_frame", "base_link");
+    const auto output_topic = declare_parameter<std::string>("output_topic", "/vla/observation");
+    const auto image_topic = declare_parameter<std::string>("image_topic", "/camera/image_compressed");
+    const auto status_topic = declare_parameter<std::string>("status_topic", "/vehicle/observation_status");
+    const auto odometry_topic = declare_parameter<std::string>("odometry_topic", "/odom");
+    const auto imu_topic = declare_parameter<std::string>("imu_topic", "/imu/data_raw");
+    const auto command_topic = declare_parameter<std::string>("command_topic", "/cmd_vel");
+    const auto battery_topic = declare_parameter<std::string>("battery_topic", "/PowerVoltage");
+    const auto task_topic = declare_parameter<std::string>("task_topic", "/vla/task");
 
     publisher_ = create_publisher<vehicle_interfaces::msg::PolicyObservation>(
-      "/vla/observation", rclcpp::QoS(2).reliable());
+      output_topic, rclcpp::QoS(2).reliable());
     image_subscription_ = create_subscription<sensor_msgs::msg::CompressedImage>(
-      "/camera/image_compressed", rclcpp::QoS(2).best_effort(),
+      image_topic, rclcpp::QoS(2).best_effort(),
       [this](sensor_msgs::msg::CompressedImage::SharedPtr message) {
         image_ = std::move(message);
         image_received_at_ = now();
       });
     status_subscription_ = create_subscription<vehicle_interfaces::msg::ObservationStatus>(
-      "/vehicle/observation_status", rclcpp::QoS(1).reliable().transient_local(),
+      status_topic, rclcpp::QoS(1).reliable().transient_local(),
       [this](vehicle_interfaces::msg::ObservationStatus::SharedPtr message) {
         observation_ready_ = message->ready;
       });
     odometry_subscription_ = create_subscription<nav_msgs::msg::Odometry>(
-      "/odom", rclcpp::SensorDataQoS(),
+      odometry_topic, rclcpp::SensorDataQoS(),
       [this](nav_msgs::msg::Odometry::SharedPtr message) {
         odometry_ = *message;
         odometry_valid_ = true;
       });
     imu_subscription_ = create_subscription<sensor_msgs::msg::Imu>(
-      "/imu/data_raw", rclcpp::SensorDataQoS(),
+      imu_topic, rclcpp::SensorDataQoS(),
       [this](sensor_msgs::msg::Imu::SharedPtr message) {
         imu_ = *message;
         imu_valid_ = true;
       });
     command_subscription_ = create_subscription<geometry_msgs::msg::Twist>(
-      "/cmd_vel", 10,
+      command_topic, 10,
       [this](geometry_msgs::msg::Twist::SharedPtr message) {
         command_ = *message;
         command_valid_ = true;
       });
     voltage_subscription_ = create_subscription<std_msgs::msg::Float32>(
-      "/PowerVoltage", 10,
+      battery_topic, 10,
       [this](std_msgs::msg::Float32::SharedPtr message) {
         voltage_ = message->data;
         voltage_valid_ = true;
       });
     task_subscription_ = create_subscription<std_msgs::msg::String>(
-      "/vla/task", rclcpp::QoS(1).reliable().transient_local(),
+      task_topic, rclcpp::QoS(1).reliable().transient_local(),
       [this](std_msgs::msg::String::SharedPtr message) {task_ = message->data;});
 
     const auto period = std::chrono::duration<double>(
@@ -98,7 +107,7 @@ private:
     const auto stamp = now();
     vehicle_interfaces::msg::PolicyObservation message;
     message.header.stamp = stamp;
-    message.header.frame_id = "base_link";
+    message.header.frame_id = base_frame_;
     message.observation_id = "obs-" + std::to_string(++sequence_);
     message.schema_version = "vehicle.observation.v1";
     message.task = task_;
@@ -136,6 +145,7 @@ private:
   double image_timeout_{0.5};
   double observation_validity_{0.5};
   bool require_status_ready_{true};
+  std::string base_frame_{"base_link"};
   bool observation_ready_{false};
   bool odometry_valid_{false};
   bool imu_valid_{false};

@@ -79,6 +79,10 @@
           </div>
         </div>
         <label>调试任务<textarea id="debugTask" rows="3" placeholder="例如：move forward and avoid obstacles">move forward and avoid obstacles</textarea></label>
+        <div class="policy-runtime-card" id="policyRuntimeCard" data-state="unknown">
+          <div class="policy-runtime-summary"><small>策略运行时 · POLICY RUNTIME</small><strong id="policyRuntimeName">正在读取 Provider</strong><span id="policyRuntimeHint">切换仅影响 Shadow 推理链路，不发布底盘控制命令</span></div>
+          <div class="policy-runtime-actions"><button class="button secondary" type="button" data-runtime-provider="mock">使用 Mock</button><button class="button primary" type="button" data-runtime-provider="smolvla">使用 SmolVLA</button></div>
+        </div>
         <div class="debug-steps debug-steps-expanded">
           <div class="debug-step active" id="debugStepCapture"><span>1</span><strong>冻结输入</strong><small>相机与车辆状态</small></div>
           <div class="debug-step" id="debugStepContract"><span>2</span><strong>契约检查</strong><small>Schema 与有效性</small></div>

@@ -217,6 +217,15 @@ std::string JobManager::create(const std::string & request_body)
   } else if (type == "policy.runtime_test") {
     if (!parameters.empty()) {throw std::invalid_argument("policy.runtime_test accepts no parameters");}
     job->command = {(scripts / "test_smolvla_runtime.sh").string()};
+  } else if (type == "policy.runtime_switch") {
+    const auto provider = required_string(parameters, "provider");
+    if (provider != "mock" && provider != "smolvla") {
+      throw std::invalid_argument("Parameter 'provider' must be mock or smolvla");
+    }
+    if (parameters.size() != 1) {
+      throw std::invalid_argument("policy.runtime_switch only accepts the provider parameter");
+    }
+    job->command = {(scripts / "switch_policy_runtime.sh").string(), provider};
   } else {
     throw std::invalid_argument("Unsupported job_type");
   }
@@ -340,6 +349,9 @@ std::optional<std::string> JobManager::cancel(const std::string & job_id)
   if (!job) {return std::nullopt;}
   if (job->state != "running" && job->state != "queued") {
     throw std::runtime_error("Job is no longer running");
+  }
+  if (job->type == "policy.runtime_switch") {
+    throw std::runtime_error("Policy Runtime switch jobs cannot be cancelled");
   }
   job->cancel_requested = true;
   job->cancellation_reason = "Cancelled by Vehicle Ops operator";

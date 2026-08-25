@@ -56,10 +56,17 @@ class MockPolicyProvider(PolicyProvider):
             response.actions.add(linear_x=linear_velocity, angular_z=angular_velocity)
         return response
     def debug(self, request, protocol):
+        total_started = time.perf_counter()
         stage = request.stage.strip().lower()
         if stage not in ("preprocess", "inference"):
             raise ValueError(f"unsupported debug stage: {request.stage}")
+        preprocessing_started = time.perf_counter()
         observation = request.observation
+        state_values = [
+            {"key": item.key, "value": item.value, "valid": item.valid}
+            for item in observation.state
+        ]
+        preprocessing_ms = (time.perf_counter() - preprocessing_started) * 1000.0
         result = {
             "schema_version": "vehicle.vla.debug.v1",
             "debug_run_id": request.debug_run_id,
@@ -70,16 +77,14 @@ class MockPolicyProvider(PolicyProvider):
                 "observation_id": observation.observation_id,
                 "task": observation.task,
                 "image_count": len(observation.images),
-                "state": [
-                    {"key": item.key, "value": item.value, "valid": item.valid}
-                    for item in observation.state
-                ],
+                "state": state_values,
             },
             "preprocessing": {"mock": True},
-            "latency_ms": {"preprocessing": 0.0, "total": 0.0},
+            "latency_ms": {"preprocessing": preprocessing_ms},
             "safety": {"operation_mode": "shadow", "publishes_control": False},
         }
         if stage == "inference":
+            inference_started = time.perf_counter()
             values = [[0.0, 0.0] for _ in range(self._horizon)]
             result["raw_output"] = {
                 "normalized_action_chunk": {"shape": [1, self._horizon, 2], "dtype": "float32", "values": values},
@@ -92,7 +97,10 @@ class MockPolicyProvider(PolicyProvider):
                     for _ in range(self._horizon)
                 ],
             }
-            result["latency_ms"]["inference"] = 0.0
+            result["latency_ms"]["inference"] = (
+                time.perf_counter() - inference_started
+            ) * 1000.0
+        result["latency_ms"]["total"] = (time.perf_counter() - total_started) * 1000.0
         return protocol.DebugResponse(
             debug_run_id=request.debug_run_id,
             provider_id=self.provider_id,
