@@ -26,7 +26,7 @@ while IFS= read -r -d '' manifest; do
   package_directory="$(dirname "${manifest}")"
   package_name="$(basename "${package_directory}")"
   ln -s "${package_directory}" "${VENDOR_ROOT}/nav2/${package_name}"
-done < <(find "${WHEELTEC_ROOT}/navigation2-humble" -mindepth 2 -maxdepth 2 -name package.xml -print0)
+done < <(find "${WHEELTEC_ROOT}/navigation2-humble" -mindepth 2 -name package.xml -print0)
 
 ln -s "${WHEELTEC_ROOT}/depend/serial_ros2" "${VENDOR_ROOT}/wheeltec/serial_ros2"
 ln -s "${WHEELTEC_ROOT}/usb_cam-ros2" "${VENDOR_ROOT}/wheeltec/usb_cam-ros2"

@@ -112,6 +112,7 @@ def main() -> int:
         "vlm_revision": runtime["vlm_revision"],
         "policy_input_features": runtime["policy_input_features"],
         "policy_output_features": runtime["policy_output_features"],
+        "policy_action": runtime.get("policy_action"),
         "last_metrics": parse_last_metrics(log_text),
         "resources": parse_tegrastats(arguments.resource_log),
         "log_sha256": sha256(arguments.log),

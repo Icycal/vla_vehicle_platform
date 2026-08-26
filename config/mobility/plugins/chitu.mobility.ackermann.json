@@ -1,0 +1,20 @@
+{
+  "schema_version": "chitu.mobility-plugin.v1",
+  "id": "chitu.mobility.ackermann",
+  "version": "1.0.0",
+  "runtime_adapter": "ackermann",
+  "parameters_file": "ros_ws/src/vehicle_bringup/config/mobility_ackermann.yaml",
+  "produces": ["chitu.action.ackermann.v1"],
+  "accepts": [
+    {"schema": "chitu.action.ackermann.v1", "compatibility": "native"}
+  ],
+  "actuator": {
+    "bridge": "wheeltec_robot_node",
+    "output_type": "geometry_msgs/Twist",
+    "output_topic": "/cmd_vel"
+  },
+  "required_parameters": [
+    "ackermann.wheelbase_m",
+    "ackermann.command_semantics"
+  ]
+}

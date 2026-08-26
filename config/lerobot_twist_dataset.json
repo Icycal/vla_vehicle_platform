@@ -1,9 +1,9 @@
 {
   "schema_version": "vehicle.lerobot.mapping.v1",
-  "repo_id": "chitu/ackermann-vehicle",
+  "repo_id": "chitu/twist-vehicle",
   "fps": 5,
   "fps_tolerance_ratio": 0.2,
-  "robot_type": "ackermann",
+  "robot_type": "mobile_robot",
   "use_videos": false,
   "image_features": [
     {
@@ -29,10 +29,10 @@
   "action_feature": {
     "target_key": "action",
     "source": "target.action",
-    "expected_schema": "chitu.action.ackermann.v1",
+    "expected_schema": "vehicle.twist_chunk.v1",
     "keys": [
-      "speed_mps",
-      "steering_angle_rad"
+      "linear_x",
+      "angular_z"
     ]
   }
 }

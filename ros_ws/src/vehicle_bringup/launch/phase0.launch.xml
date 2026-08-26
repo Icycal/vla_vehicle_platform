@@ -4,6 +4,8 @@
   <arg name="policy_params_file"
        default="$(find-pkg-share vehicle_bringup)/config/phase0.yaml"/>
   <arg name="policy_socket_path" default="/run/vla-policy/policy.sock"/>
+  <arg name="mobility_params_file"
+       default="$(find-pkg-share vehicle_bringup)/config/mobility_twist.yaml"/>
 
   <node pkg="vehicle_runtime" exec="vehicle_supervisor" name="vehicle_supervisor" output="screen">
     <param from="$(var params_file)"/>
@@ -15,6 +17,10 @@
   </node>
   <node pkg="vehicle_runtime" exec="vla_action_runtime" name="vla_action_runtime" output="screen">
     <param from="$(var params_file)"/>
+    <param from="$(var mobility_params_file)"/>
+  </node>
+  <node pkg="vehicle_runtime" exec="vehicle_action_capture" name="vehicle_action_capture" output="screen">
+    <param from="$(var mobility_params_file)"/>
   </node>
   <node pkg="vehicle_runtime" exec="vla_control_mux" name="vla_control_mux" output="screen">
     <param from="$(var params_file)"/>

@@ -45,8 +45,10 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 path, version, model_id, revision, dataset_id = sys.argv[1:]
-manifest = {"schema_version": "vehicle.policy-model.v1", "version": version, "provider": "smolvla", "model_id": model_id, "revision": revision, "dataset_id": dataset_id, "installed_at": datetime.now(timezone.utc).isoformat(), "state": "installed"}
-Path(path).write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+manifest_path = Path(path)
+manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.is_file() else {}
+manifest.update({"schema_version": "vehicle.policy-model.v1", "version": version, "provider": "smolvla", "model_id": model_id, "revision": revision, "dataset_id": dataset_id, "installed_at": datetime.now(timezone.utc).isoformat(), "state": "installed"})
+manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 PY
 
 mv "${PARTIAL}" "${TARGET}"

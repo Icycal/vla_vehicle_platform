@@ -20,6 +20,7 @@ public:
   bool ready() const override;
   std::string provider_id() const override;
   std::string model_id() const override;
+  std::string action_schema() const override;
   std::string status_message() const override;
   PolicyPrediction predict(const PolicyObservationInput & observation) override;
   PolicyDebugResult debug(

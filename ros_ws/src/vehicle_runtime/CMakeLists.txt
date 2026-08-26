@@ -26,6 +26,9 @@ ament_target_dependencies(
 add_executable(vla_action_runtime src/vla_action_runtime_node.cpp)
 ament_target_dependencies(vla_action_runtime geometry_msgs rclcpp vehicle_interfaces)
 
+add_executable(vehicle_action_capture src/vehicle_action_capture_node.cpp)
+ament_target_dependencies(vehicle_action_capture geometry_msgs rclcpp vehicle_interfaces)
+
 add_executable(vla_control_mux src/vla_control_mux_node.cpp)
 ament_target_dependencies(vla_control_mux geometry_msgs rclcpp vehicle_interfaces)
 
@@ -34,6 +37,7 @@ ament_target_dependencies(vla_safety_guard geometry_msgs rclcpp sensor_msgs vehi
 
 install(TARGETS
   vehicle_supervisor
+  vehicle_action_capture
   vla_policy_gateway
   vla_action_runtime
   vla_control_mux

@@ -44,6 +44,10 @@ message TwistAction {
   double angular_z = 6;
 }
 
+message ActionVector {
+  repeated double values = 1;
+}
+
 message PredictResponse {
   string request_id = 1;
   string observation_id = 2;
@@ -53,7 +57,12 @@ message PredictResponse {
   int64 generated_at_ns = 6;
   int64 valid_until_ns = 7;
   int64 control_period_ns = 8;
+  // Deprecated migration field for vehicle.twist_chunk.v1 consumers.
   repeated TwistAction actions = 9;
+  repeated string action_features = 10;
+  repeated string action_units = 11;
+  repeated ActionVector action_vectors = 12;
+  string action_schema_hash = 13;
 }
 
 

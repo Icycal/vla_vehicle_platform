@@ -1,0 +1,8 @@
+vla_action_runtime:
+  ros__parameters:
+    mobility_adapter: twist
+
+vehicle_action_capture:
+  ros__parameters:
+    mobility_adapter: twist
+    comparison_tolerance: 0.0001

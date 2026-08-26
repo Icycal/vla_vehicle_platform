@@ -16,6 +16,7 @@ public:
   bool ready() const override;
   std::string provider_id() const override;
   std::string model_id() const override;
+  std::string action_schema() const override;
   std::string status_message() const override;
   PolicyPrediction predict(const PolicyObservationInput & observation) override;
   PolicyDebugResult debug(
@@ -30,6 +31,7 @@ private:
   bool ready_{false};
   std::string provider_id_{"unix_socket"};
   std::string model_id_;
+  std::string action_schema_{"vehicle.twist_chunk.v1"};
   std::string status_message_{"Policy runtime not checked"};
 };
 

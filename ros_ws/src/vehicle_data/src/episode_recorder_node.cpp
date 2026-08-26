@@ -15,6 +15,7 @@
 #include <vehicle_interfaces/msg/shadow_comparison.hpp>
 #include <vehicle_interfaces/msg/shadow_metrics.hpp>
 #include <vehicle_interfaces/msg/system_state.hpp>
+#include <vehicle_interfaces/msg/training_action.hpp>
 #include <vehicle_interfaces/srv/start_episode.hpp>
 #include <vehicle_interfaces/srv/stop_episode.hpp>
 
@@ -134,6 +135,16 @@ public:
       "/cmd_vel", 10,
       [this](geometry_msgs::msg::Twist::SharedPtr message) {
         record_message(*message, "/cmd_vel", now());
+      });
+    target_action_subscription_ = create_subscription<vehicle_interfaces::msg::TrainingAction>(
+      "/chitu/action/target", 10,
+      [this](vehicle_interfaces::msg::TrainingAction::SharedPtr message) {
+        record_header_message(*message, "/chitu/action/target");
+      });
+    executed_action_subscription_ = create_subscription<vehicle_interfaces::msg::TrainingAction>(
+      "/chitu/action/executed", 10,
+      [this](vehicle_interfaces::msg::TrainingAction::SharedPtr message) {
+        record_header_message(*message, "/chitu/action/executed");
       });
     task_subscription_ = create_subscription<std_msgs::msg::String>(
       "/vla/task", rclcpp::QoS(1).reliable().transient_local(),
@@ -445,6 +456,10 @@ private:
   rclcpp::Subscription<geometry_msgs::msg::TwistStamped>::SharedPtr
     selected_command_subscription_;
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr final_command_subscription_;
+  rclcpp::Subscription<vehicle_interfaces::msg::TrainingAction>::SharedPtr
+    target_action_subscription_;
+  rclcpp::Subscription<vehicle_interfaces::msg::TrainingAction>::SharedPtr
+    executed_action_subscription_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr task_subscription_;
   rclcpp::TimerBase::SharedPtr timer_;
 };

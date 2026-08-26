@@ -1,0 +1,10 @@
+std_msgs/Header header
+string observation_id
+string action_schema
+string schema_hash
+string[] feature_names
+string[] feature_units
+float32[] values
+string source
+bool safety_intervened
+string[] safety_reasons

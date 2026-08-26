@@ -1,0 +1,17 @@
+{
+  "schema_version": "chitu.mobility-plugin.v1",
+  "id": "chitu.mobility.twist",
+  "version": "1.0.0",
+  "runtime_adapter": "twist",
+  "parameters_file": "ros_ws/src/vehicle_bringup/config/mobility_twist.yaml",
+  "produces": ["vehicle.twist_chunk.v1"],
+  "accepts": [
+    {"schema": "vehicle.twist_chunk.v1", "compatibility": "native"},
+    {"schema": "chitu.action.differential.v1", "compatibility": "native"},
+    {"schema": "chitu.action.mecanum.v1", "compatibility": "native"}
+  ],
+  "actuator": {
+    "output_type": "geometry_msgs/Twist",
+    "output_topic": "/cmd_vel"
+  }
+}

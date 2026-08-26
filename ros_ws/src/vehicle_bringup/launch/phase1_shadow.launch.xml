@@ -4,11 +4,14 @@
   <arg name="shadow_params" default="$(find-pkg-share vehicle_bringup)/config/phase1_shadow.yaml"/>
   <arg name="policy_params_file" default="$(find-pkg-share vehicle_bringup)/config/phase0.yaml"/>
   <arg name="policy_socket_path" default="/run/vla-policy/policy.sock"/>
+  <arg name="mobility_params_file"
+       default="$(find-pkg-share vehicle_bringup)/config/mobility_twist.yaml"/>
   <arg name="episode_storage_root" default=""/>
   <arg name="debug_artifact_root" default=""/>
   <include file="$(find-pkg-share vehicle_bringup)/launch/phase0.launch.xml">
     <arg name="policy_params_file" value="$(var policy_params_file)"/>
     <arg name="policy_socket_path" value="$(var policy_socket_path)"/>
+    <arg name="mobility_params_file" value="$(var mobility_params_file)"/>
   </include>
   <include if="$(var enable_camera)" file="$(find-pkg-share vehicle_bringup)/launch/front_camera.launch.xml">
     <arg name="camera_params" value="$(var camera_params)"/>

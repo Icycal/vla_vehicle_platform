@@ -1,4 +1,4 @@
-﻿import json
+import json
 import os
 import threading
 import time
@@ -47,7 +47,7 @@ class SmolVLAPolicyProvider(PolicyProvider):
         self._response_margin_ns = max(
             0, int(os.environ.get("SMOLVLA_RESPONSE_MARGIN_MS", "500")) * 1_000_000
         )
-        self._adapter = create_action_adapter()
+        self._adapter = create_action_adapter(self._model_dir)
         self._predict_lock = threading.Lock()
         self._request_counter = 0
         self._ready = False
@@ -79,6 +79,10 @@ class SmolVLAPolicyProvider(PolicyProvider):
     @property
     def model_id(self) -> str:
         return self._model_id
+
+    @property
+    def action_schema(self) -> str:
+        return self._adapter.action_schema
 
     @property
     def status_message(self) -> str:
@@ -290,11 +294,17 @@ class SmolVLAPolicyProvider(PolicyProvider):
             }
             result["interpreted_output"] = {
                 "adapter_id": self._adapter.adapter_id,
-                "twist_actions": [
-                    {"linear_x": float(linear), "angular_z": float(angular)}
-                    for linear, angular in adapted_actions
-                ],
+                "action_schema": self._adapter.action_schema,
+                "schema_hash": self._adapter.schema_hash,
+                "feature_names": list(self._adapter.feature_names),
+                "feature_units": list(self._adapter.feature_units),
+                "actions": [{"values": list(values)} for values in adapted_actions],
             }
+            if self._adapter.supports_legacy_twist:
+                result["interpreted_output"]["twist_actions"] = [
+                    {"linear_x": float(values[0]), "angular_z": float(values[1])}
+                    for values in adapted_actions
+                ]
             result["latency_ms"].update(
                 inference=self._last_inference_ms,
                 postprocessing=(time.perf_counter() - postprocess_started) * 1000.0,
@@ -325,15 +335,20 @@ class SmolVLAPolicyProvider(PolicyProvider):
                 observation_id=request.observation_id,
                 provider_id=self.provider_id,
                 model_id=self.model_id,
-                action_schema="vehicle.twist_chunk.v1",
+                action_schema=self._adapter.action_schema,
+                action_schema_hash=self._adapter.schema_hash,
                 generated_at_ns=generated_at,
                 valid_until_ns=(
                     generated_at + self._control_period_ns * len(adapted_actions) + self._response_margin_ns
                 ),
                 control_period_ns=self._control_period_ns,
             )
-            for linear_value, angular_value in adapted_actions:
-                response.actions.add(linear_x=linear_value, angular_z=angular_value)
+            response.action_features.extend(self._adapter.feature_names)
+            response.action_units.extend(self._adapter.feature_units)
+            for values in adapted_actions:
+                response.action_vectors.add().values.extend(values)
+                if self._adapter.supports_legacy_twist:
+                    response.actions.add(linear_x=values[0], angular_z=values[1])
             self._status_message = self._format_status("ready")
             raw_preview = raw_actions[0] if raw_actions else []
             print(

@@ -266,21 +266,35 @@ private:
     const double action_age = age_seconds(policy_action_, current);
     bool action_matches = policy_action_.message && observation_.message &&
       policy_action_.message->observation_id == observation_.message->observation_id;
+    const std::size_t policy_action_count = !policy_action_.message ? 0U :
+      (!policy_action_.message->action_vectors.empty() ?
+      policy_action_.message->action_vectors.size() : policy_action_.message->actions.size());
+    Json first_policy_action = Json::object();
+    if (policy_action_.message && !policy_action_.message->action_vectors.empty()) {
+      first_policy_action = Json({
+        {"schema", policy_action_.message->schema_version},
+        {"schema_hash", policy_action_.message->schema_hash},
+        {"feature_names", policy_action_.message->feature_names},
+        {"values", policy_action_.message->action_vectors.front().values}});
+    } else if (policy_action_.message && !policy_action_.message->actions.empty()) {
+      first_policy_action = twist_json(policy_action_.message->actions.front());
+    }
     const uint8_t action_status = freshness_status(
       action_age, policy_action_stale_seconds_, Stage::STATUS_READY);
     trace.stages.push_back(stage(
       "policy_output", "Policy Output", "vla_policy_gateway",
       action_status, action_age, policy_status_.message ? policy_status_.message->inference_latency_ms : -1.0,
       policy_action_.message ? policy_action_.message->observation_id : "No request",
-      policy_action_.message ? std::to_string(policy_action_.message->actions.size()) + " Twist actions" : "No action",
+      policy_action_.message ? std::to_string(policy_action_count) + " action vectors" : "No action",
       !policy_action_.message ? "Waiting for PolicyAction" :
       (action_age > policy_action_stale_seconds_ ? "Latest PolicyAction exceeded the freshness threshold" :
       (action_matches ? "Policy output matches live Observation head" :
       "Policy output is fresh; Observation advanced during inference")),
       policy_action_.message ? Json({{"request_id", policy_action_.message->request_id},
         {"observation_id", policy_action_.message->observation_id},
-        {"action_count", policy_action_.message->actions.size()},
-        {"first_action", policy_action_.message->actions.empty() ? "" : twist_json(policy_action_.message->actions.front())}}) : Json::object()));
+        {"action_schema", policy_action_.message->schema_version},
+        {"action_count", policy_action_count},
+        {"first_action", first_policy_action}}) : Json::object()));
 
     const double raw_age = age_seconds(raw_command_, current);
     trace.stages.push_back(stage(

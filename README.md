@@ -303,3 +303,7 @@ Do not source either legacy workspace before building or running this project. S
 `DEPENDENCIES.md` for source provenance and licensing constraints.
 
 - 组件编排与网页启停：`docs/COMPONENT_ORCHESTRATION.md`
+
+## 车型动作插件
+
+车型 Action Schema、采集、训练、推理适配和 WheelTec Vendor 复用说明见 docs/MOBILITY_ACTION_PLUGINS.md。

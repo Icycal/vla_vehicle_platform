@@ -52,7 +52,10 @@ class MockPolicyProvider(PolicyProvider):
         )
         linear_velocity = self._linear_velocity if request.task else 0.0
         angular_velocity = self._angular_velocity if request.task else 0.0
+        response.action_features.extend(("linear_x", "angular_z"))
+        response.action_units.extend(("m/s", "rad/s"))
         for _ in range(self._horizon):
+            response.action_vectors.add().values.extend((linear_velocity, angular_velocity))
             response.actions.add(linear_x=linear_velocity, angular_z=angular_velocity)
         return response
     def debug(self, request, protocol):

@@ -163,6 +163,7 @@ void UnixSocketPolicyTransport::refresh()
     ready_ = response.health_response().ready();
     provider_id_ = response.health_response().provider_id();
     model_id_ = response.health_response().model_id();
+    action_schema_ = response.health_response().action_schema();
     status_message_ = response.health_response().message();
   } catch (const std::exception & error) {
     std::lock_guard<std::mutex> lock(state_mutex_);
@@ -187,6 +188,12 @@ std::string UnixSocketPolicyTransport::model_id() const
 {
   std::lock_guard<std::mutex> lock(state_mutex_);
   return model_id_;
+}
+
+std::string UnixSocketPolicyTransport::action_schema() const
+{
+  std::lock_guard<std::mutex> lock(state_mutex_);
+  return action_schema_;
 }
 
 std::string UnixSocketPolicyTransport::status_message() const
@@ -215,8 +222,16 @@ PolicyPrediction UnixSocketPolicyTransport::predict(const PolicyObservationInput
     prediction.request_id = source.request_id();
     prediction.observation_id = source.observation_id();
     prediction.model_id = source.model_id();
+    prediction.action_schema = source.action_schema();
+    prediction.action_schema_hash = source.action_schema_hash();
+    prediction.action_features.assign(source.action_features().begin(), source.action_features().end());
+    prediction.action_units.assign(source.action_units().begin(), source.action_units().end());
     prediction.control_period = std::chrono::duration_cast<std::chrono::milliseconds>(
       std::chrono::nanoseconds(source.control_period_ns()));
+    prediction.action_vectors.reserve(source.action_vectors_size());
+    for (const auto & source_action : source.action_vectors()) {
+      prediction.action_vectors.emplace_back(source_action.values().begin(), source_action.values().end());
+    }
     prediction.actions.reserve(source.actions_size());
     for (const auto & source_action : source.actions()) {
       geometry_msgs::msg::Twist action;
@@ -228,7 +243,15 @@ PolicyPrediction UnixSocketPolicyTransport::predict(const PolicyObservationInput
       action.angular.z = source_action.angular_z();
       prediction.actions.push_back(action);
     }
-    if (prediction.actions.empty() || prediction.control_period.count() <= 0) {
+    if (prediction.action_vectors.empty() && !prediction.actions.empty()) {
+      prediction.action_features = {"linear_x", "angular_z"};
+      prediction.action_units = {"m/s", "rad/s"};
+      for (const auto & action : prediction.actions) {
+        prediction.action_vectors.push_back({
+          static_cast<float>(action.linear.x), static_cast<float>(action.angular.z)});
+      }
+    }
+    if (prediction.action_vectors.empty() || prediction.control_period.count() <= 0) {
       throw std::runtime_error("policy response contains no executable actions");
     }
     return prediction;

@@ -22,11 +22,32 @@ cp -f "${ENV_FILE}" "${BACKUP}"
 restore_previous() { cp -f "${BACKUP}" "${ENV_FILE}"; "${PROJECT_ROOT}/scripts/switch_policy_runtime.sh" smolvla || true; rm -f "${BACKUP}"; }
 trap restore_previous ERR
 
-python3 - "${ENV_FILE}" "${MODEL_ROOT}" "${MODEL_ID}" <<'PY'
+python3 - "${ENV_FILE}" "${MODEL_ROOT}" "${MODEL_ID}" "${PROJECT_ROOT}/run/config/mobility.json" <<'PY'
+import json
 import sys
 from pathlib import Path
 path = Path(sys.argv[1])
-updates = {"SMOLVLA_MODEL_ROOT": sys.argv[2], "SMOLVLA_MODEL_ID": sys.argv[3]}
+model_root = Path(sys.argv[2])
+manifest_path = model_root / "vehicle_model_manifest.json"
+manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.is_file() else {}
+action = manifest.get("action")
+updates = {"SMOLVLA_MODEL_ROOT": str(model_root), "SMOLVLA_MODEL_ID": sys.argv[3]}
+if action:
+    action_schema = str(action.get("schema", ""))
+    if not action_schema:
+        raise ValueError("Model action descriptor has no schema")
+    mobility_path = Path(sys.argv[4])
+    if not mobility_path.is_file():
+        raise ValueError("Activate a mobility plugin before activating a trained action model")
+    mobility = json.loads(mobility_path.read_text(encoding="utf-8"))
+    accepted = {item.get("schema") for item in mobility.get("accepts", [])}
+    if action_schema not in accepted:
+        raise ValueError(
+            f"Model action schema {action_schema} is incompatible with {mobility.get('plugin_id')}"
+        )
+    updates["SMOLVLA_ACTION_ADAPTER"] = "manifest"
+else:
+    updates["SMOLVLA_ACTION_ADAPTER"] = "zero"
 lines = path.read_text(encoding="utf-8").splitlines()
 seen, output = set(), []
 for line in lines:

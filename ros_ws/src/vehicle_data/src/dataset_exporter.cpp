@@ -5,6 +5,7 @@
 #include <vehicle_interfaces/msg/policy_action.hpp>
 #include <vehicle_interfaces/msg/policy_observation.hpp>
 #include <vehicle_interfaces/msg/shadow_comparison.hpp>
+#include <vehicle_interfaces/msg/training_action.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -182,6 +183,48 @@ void write_twist(std::ostream & output, const geometry_msgs::msg::Twist & twist)
          << ",\"angular_z\":" << twist.angular.z << "}";
 }
 
+void write_string_array(std::ostream & output, const std::vector<std::string> & values)
+{
+  output << '[';
+  for (std::size_t index = 0; index < values.size(); ++index) {
+    if (index > 0) {
+      output << ',';
+    }
+    output << '"' << json_escape(values[index]) << '"';
+  }
+  output << ']';
+}
+
+void write_float_array(std::ostream & output, const std::vector<float> & values)
+{
+  output << '[';
+  for (std::size_t index = 0; index < values.size(); ++index) {
+    if (index > 0) {
+      output << ',';
+    }
+    output << values[index];
+  }
+  output << ']';
+}
+
+void write_training_action(
+  std::ostream & output, const vehicle_interfaces::msg::TrainingAction & action)
+{
+  output << "{\"schema\":\"" << json_escape(action.action_schema) << "\""
+         << ",\"schema_hash\":\"" << json_escape(action.schema_hash) << "\""
+         << ",\"feature_names\":";
+  write_string_array(output, action.feature_names);
+  output << ",\"feature_units\":";
+  write_string_array(output, action.feature_units);
+  output << ",\"values\":";
+  write_float_array(output, action.values);
+  output << ",\"source\":\"" << json_escape(action.source) << "\""
+         << ",\"safety_intervened\":" << (action.safety_intervened ? "true" : "false")
+         << ",\"safety_reasons\":";
+  write_string_array(output, action.safety_reasons);
+  output << '}';
+}
+
 void write_frame(
   std::ofstream & frames,
   const std::filesystem::path & output_path,
@@ -189,6 +232,8 @@ void write_frame(
   const std::size_t frame_index,
   const ObservationRecord & record,
   const std::optional<vehicle_interfaces::msg::PolicyAction> & action,
+  const std::optional<vehicle_interfaces::msg::TrainingAction> & target_action,
+  const std::optional<vehicle_interfaces::msg::TrainingAction> & executed_action,
   const std::optional<vehicle_interfaces::msg::ShadowComparison> & comparison,
   ExportStats & stats)
 {
@@ -273,14 +318,29 @@ void write_frame(
   frames << '}';
 
   frames << ",\"target\":{";
-  if (comparison) {
+  if (executed_action) {
+    frames << "\"available\":true,\"source\":\""
+           << json_escape(executed_action->source) << "\",\"action\":";
+    write_training_action(frames, *executed_action);
+    if (target_action) {
+      frames << ",\"requested_action\":";
+      write_training_action(frames, *target_action);
+    }
+    if (comparison) {
+      frames << ",\"legacy_shadow\":{\"executed_twist\":";
+      write_twist(frames, comparison->executed);
+      frames << ",\"predicted_twist\":";
+      write_twist(frames, comparison->predicted);
+      frames << ",\"linear_absolute_error\":" << comparison->linear_absolute_error
+             << ",\"angular_absolute_error\":" << comparison->angular_absolute_error
+             << ",\"within_threshold\":" << (comparison->within_threshold ? "true" : "false")
+             << '}';
+    }
+  } else if (comparison) {
     frames << "\"available\":true,\"source\":\"shadow.executed_twist\",\"twist\":";
     write_twist(frames, comparison->executed);
     frames << ",\"predicted_twist\":";
     write_twist(frames, comparison->predicted);
-    frames << ",\"linear_absolute_error\":" << comparison->linear_absolute_error
-           << ",\"angular_absolute_error\":" << comparison->angular_absolute_error
-           << ",\"within_threshold\":" << (comparison->within_threshold ? "true" : "false");
   } else {
     frames << "\"available\":false";
   }
@@ -304,7 +364,7 @@ void write_manifest(
            << json_escape(arguments.episode_path.string()) << "\",\n"
            << "  \"frame_file\": \"frames.jsonl\",\n"
            << "  \"image_root\": \"images\",\n"
-           << "  \"target_source\": \"shadow.executed_twist\",\n"
+           << "  \"target_source\": \"chitu.action.executed with shadow fallback\",\n"
            << "  \"include_incomplete\": "
            << (arguments.include_incomplete ? "true" : "false") << ",\n"
            << "  \"observation_count\": " << stats.observation_count << ",\n"
@@ -322,6 +382,8 @@ int main(int argc, char ** argv)
     const Arguments arguments = parse_arguments(argc, argv);
     std::map<std::string, ObservationRecord> observations;
     std::map<std::string, vehicle_interfaces::msg::PolicyAction> actions;
+    std::map<std::string, vehicle_interfaces::msg::TrainingAction> target_actions;
+    std::map<std::string, vehicle_interfaces::msg::TrainingAction> executed_actions;
     std::map<std::string, vehicle_interfaces::msg::ShadowComparison> comparisons;
     std::vector<std::string> observation_order;
 
@@ -345,6 +407,16 @@ int main(int argc, char ** argv)
         if (!action.observation_id.empty()) {
           const std::string observation_id = action.observation_id;
           actions[observation_id] = std::move(action);
+        }
+      } else if (bag_message->topic_name == "/chitu/action/target") {
+        auto action = deserialize_message<vehicle_interfaces::msg::TrainingAction>(bag_message);
+        if (!action.observation_id.empty()) {
+          target_actions[action.observation_id] = std::move(action);
+        }
+      } else if (bag_message->topic_name == "/chitu/action/executed") {
+        auto action = deserialize_message<vehicle_interfaces::msg::TrainingAction>(bag_message);
+        if (!action.observation_id.empty()) {
+          executed_actions[action.observation_id] = std::move(action);
         }
       } else if (bag_message->topic_name == "/vla/shadow_comparison") {
         auto comparison = deserialize_message<vehicle_interfaces::msg::ShadowComparison>(bag_message);
@@ -373,8 +445,11 @@ int main(int argc, char ** argv)
     try {
       for (const auto & observation_id : observation_order) {
         const auto action_iterator = actions.find(observation_id);
+        const auto target_iterator = target_actions.find(observation_id);
+        const auto executed_iterator = executed_actions.find(observation_id);
         const auto comparison_iterator = comparisons.find(observation_id);
-        const bool complete = comparison_iterator != comparisons.end();
+        const bool complete = executed_iterator != executed_actions.end() ||
+          comparison_iterator != comparisons.end();
         if (!complete) {
           ++stats.incomplete_count;
           if (!arguments.include_incomplete) {
@@ -384,12 +459,18 @@ int main(int argc, char ** argv)
         const std::optional<vehicle_interfaces::msg::PolicyAction> action =
           action_iterator == actions.end() ? std::nullopt :
           std::optional<vehicle_interfaces::msg::PolicyAction>(action_iterator->second);
+        const std::optional<vehicle_interfaces::msg::TrainingAction> target_action =
+          target_iterator == target_actions.end() ? std::nullopt :
+          std::optional<vehicle_interfaces::msg::TrainingAction>(target_iterator->second);
+        const std::optional<vehicle_interfaces::msg::TrainingAction> executed_action =
+          executed_iterator == executed_actions.end() ? std::nullopt :
+          std::optional<vehicle_interfaces::msg::TrainingAction>(executed_iterator->second);
         const std::optional<vehicle_interfaces::msg::ShadowComparison> comparison =
           comparison_iterator == comparisons.end() ? std::nullopt :
           std::optional<vehicle_interfaces::msg::ShadowComparison>(comparison_iterator->second);
         write_frame(
           frames, temporary_path, episode_id, stats.frame_count,
-          observations.at(observation_id), action, comparison, stats);
+          observations.at(observation_id), action, target_action, executed_action, comparison, stats);
         ++stats.frame_count;
       }
       frames.close();

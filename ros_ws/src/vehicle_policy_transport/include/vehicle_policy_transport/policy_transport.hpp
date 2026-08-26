@@ -35,7 +35,12 @@ struct PolicyPrediction
   std::string request_id;
   std::string observation_id;
   std::string model_id;
+  std::string action_schema{"vehicle.twist_chunk.v1"};
+  std::string action_schema_hash;
+  std::vector<std::string> action_features;
+  std::vector<std::string> action_units;
   std::chrono::milliseconds control_period{50};
+  std::vector<std::vector<float>> action_vectors;
   std::vector<geometry_msgs::msg::Twist> actions;
 };
 
@@ -48,6 +53,7 @@ struct PolicyDebugResult
   std::string result_json;
   std::vector<uint8_t> processed_image_jpeg;
 };
+
 class PolicyTransport
 {
 public:
@@ -56,6 +62,7 @@ public:
   virtual bool ready() const = 0;
   virtual std::string provider_id() const = 0;
   virtual std::string model_id() const = 0;
+  virtual std::string action_schema() const = 0;
   virtual std::string status_message() const = 0;
   virtual PolicyPrediction predict(const PolicyObservationInput & observation) = 0;
   virtual PolicyDebugResult debug(

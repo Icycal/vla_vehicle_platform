@@ -1,0 +1,12 @@
+vla_action_runtime:
+  ros__parameters:
+    mobility_adapter: ackermann
+    ackermann.wheelbase_m: 0.32
+    ackermann.command_semantics: yaw_rate
+
+vehicle_action_capture:
+  ros__parameters:
+    mobility_adapter: ackermann
+    ackermann.wheelbase_m: 0.32
+    ackermann.command_semantics: yaw_rate
+    comparison_tolerance: 0.0001

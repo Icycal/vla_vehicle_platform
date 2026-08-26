@@ -113,6 +113,7 @@ def main() -> int:
         "vlm_revision": revision,
         "policy_input_features": input_features,
         "policy_output_features": output_features,
+        "policy_action": dataset_manifest.get("action_descriptor"),
     }
     (output / "runtime.json").write_text(json.dumps(runtime, indent=2) + "\n")
     print(output / "runtime.json")

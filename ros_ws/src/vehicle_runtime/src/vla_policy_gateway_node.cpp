@@ -1,4 +1,5 @@
 #include <rclcpp/rclcpp.hpp>
+#include <vehicle_interfaces/msg/action_vector.hpp>
 #include <vehicle_interfaces/msg/policy_action.hpp>
 #include <vehicle_interfaces/msg/policy_observation.hpp>
 #include <vehicle_interfaces/msg/policy_status.hpp>
@@ -98,7 +99,7 @@ private:
     message.model_id = transport_->model_id();
     message.protocol_version = "1";
     message.observation_schema = "vehicle.observation.v1";
-    message.action_schema = "vehicle.twist_chunk.v1";
+    message.action_schema = transport_->action_schema();
     message.inference_latency_ms = last_latency_ms_.load();
     message.message = transport_->status_message();
     status_publisher_->publish(message);
@@ -177,12 +178,21 @@ private:
     message.request_id = prediction.request_id;
     message.observation_id = prediction.observation_id;
     message.model_id = prediction.model_id;
-    message.schema_version = "vehicle.twist_chunk.v1";
+    message.schema_version = prediction.action_schema;
+    message.schema_hash = prediction.action_schema_hash;
+    message.feature_names = prediction.action_features;
+    message.feature_units = prediction.action_units;
     message.generated_at = stamp;
     message.control_period = rclcpp::Duration(prediction.control_period);
     const auto validity = prediction.control_period *
-      static_cast<int64_t>(std::max<std::size_t>(prediction.actions.size(), 1));
+      static_cast<int64_t>(std::max<std::size_t>(prediction.action_vectors.size(), 1));
     message.valid_until = stamp + rclcpp::Duration(validity + 500ms);
+    message.action_vectors.reserve(prediction.action_vectors.size());
+    for (const auto & values : prediction.action_vectors) {
+      vehicle_interfaces::msg::ActionVector action;
+      action.values = values;
+      message.action_vectors.push_back(std::move(action));
+    }
     message.actions = prediction.actions;
     action_publisher_->publish(message);
 

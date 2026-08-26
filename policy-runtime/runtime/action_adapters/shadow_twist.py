@@ -2,6 +2,7 @@ import math
 import os
 
 from .base import ActionAdapter
+from .descriptor import ActionDescriptor
 
 
 class ShadowTwistActionAdapter(ActionAdapter):
@@ -42,6 +43,11 @@ class ShadowTwistActionAdapter(ActionAdapter):
         self._angular_offset = angular_offset
         self._linear_limit = max(0.0, linear_limit)
         self._angular_limit = max(0.0, angular_limit)
+        self._descriptor = ActionDescriptor(
+            schema="vehicle.twist_chunk.v1",
+            feature_names=("linear_x", "angular_z"),
+            feature_units=("m/s", "rad/s"),
+        )
 
     @classmethod
     def from_environment(cls):
@@ -64,12 +70,32 @@ class ShadowTwistActionAdapter(ActionAdapter):
             return "smolvla-shadow-zero-v1"
         return "smolvla-untrained-affine-shadow-v1"
 
+    @property
+    def action_schema(self) -> str:
+        return self._descriptor.schema
+
+    @property
+    def schema_hash(self) -> str:
+        return self._descriptor.schema_hash
+
+    @property
+    def feature_names(self):
+        return self._descriptor.feature_names
+
+    @property
+    def feature_units(self):
+        return self._descriptor.feature_units
+
+    @property
+    def supports_legacy_twist(self) -> bool:
+        return True
+
     def adapt(self, raw_actions):
         action_count = min(len(raw_actions), self._horizon)
         if action_count == 0:
             raise ValueError("SmolVLA produced an empty action chunk")
         if self._mode == "zero":
-            return [(0.0, 0.0) for _ in range(action_count)]
+            return [[0.0, 0.0] for _ in range(action_count)]
 
         adapted_actions = []
         for action in raw_actions[:action_count]:
@@ -91,5 +117,5 @@ class ShadowTwistActionAdapter(ActionAdapter):
                 raise ValueError("SmolVLA action adapter produced a non-finite value")
             linear_value = max(-self._linear_limit, min(self._linear_limit, linear_value))
             angular_value = max(-self._angular_limit, min(self._angular_limit, angular_value))
-            adapted_actions.append((linear_value, angular_value))
+            adapted_actions.append([linear_value, angular_value])
         return adapted_actions

@@ -1,4 +1,5 @@
 #include <geometry_msgs/msg/twist.hpp>
+#include <geometry_msgs/msg/twist_stamped.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <vehicle_interfaces/msg/policy_action.hpp>
 #include <vehicle_interfaces/msg/shadow_comparison.hpp>
@@ -30,12 +31,16 @@ public:
       [this](vehicle_interfaces::msg::SystemState::SharedPtr message) {
         shadow_mode_ = message->mode == vehicle_interfaces::msg::SystemState::MODE_VLA_SHADOW;
         if (!shadow_mode_) {
+          metadata_pending_ = false;
           prediction_pending_ = false;
         }
       });
     action_subscription_ = create_subscription<vehicle_interfaces::msg::PolicyAction>(
       "/vla/policy_action", 10,
       std::bind(&ShadowEvaluator::on_policy_action, this, std::placeholders::_1));
+    raw_command_subscription_ = create_subscription<geometry_msgs::msg::TwistStamped>(
+      "/vla/cmd_vel_raw", 10,
+      std::bind(&ShadowEvaluator::on_raw_command, this, std::placeholders::_1));
     command_subscription_ = create_subscription<geometry_msgs::msg::Twist>(
       "/cmd_vel", 10,
       std::bind(&ShadowEvaluator::on_executed_command, this, std::placeholders::_1));
@@ -45,14 +50,24 @@ public:
 private:
   void on_policy_action(const vehicle_interfaces::msg::PolicyAction::SharedPtr message)
   {
-    if (!shadow_mode_ || message->actions.empty()) {
+    if (!shadow_mode_ || (message->action_vectors.empty() && message->actions.empty())) {
       return;
     }
     pending_request_id_ = message->request_id;
     pending_observation_id_ = message->observation_id;
     pending_model_id_ = message->model_id;
     pending_generated_at_ = rclcpp::Time(message->generated_at);
-    pending_action_ = message->actions.front();
+    metadata_pending_ = true;
+    prediction_pending_ = false;
+  }
+
+  void on_raw_command(const geometry_msgs::msg::TwistStamped::SharedPtr message)
+  {
+    if (!shadow_mode_ || !metadata_pending_) {
+      return;
+    }
+    pending_action_ = message->twist;
+    metadata_pending_ = false;
     prediction_pending_ = true;
   }
 
@@ -123,6 +138,7 @@ private:
   double linear_error_threshold_{0.10};
   double angular_error_threshold_{0.20};
   bool shadow_mode_{false};
+  bool metadata_pending_{false};
   bool prediction_pending_{false};
   uint64_t sample_count_{0};
   double linear_error_sum_{0.0};
@@ -138,6 +154,7 @@ private:
   rclcpp::Publisher<vehicle_interfaces::msg::ShadowMetrics>::SharedPtr metrics_publisher_;
   rclcpp::Subscription<vehicle_interfaces::msg::SystemState>::SharedPtr state_subscription_;
   rclcpp::Subscription<vehicle_interfaces::msg::PolicyAction>::SharedPtr action_subscription_;
+  rclcpp::Subscription<geometry_msgs::msg::TwistStamped>::SharedPtr raw_command_subscription_;
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr command_subscription_;
 };
 

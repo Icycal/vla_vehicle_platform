@@ -81,22 +81,20 @@ def main():
     result = response.predict_response
     if result.observation_id != prediction.observation_id:
         raise RuntimeError("observation correlation mismatch")
-    if not result.actions:
-        raise RuntimeError("SmolVLA response contains no actions")
-    for action in result.actions:
-        if not math.isfinite(action.linear_x) or not math.isfinite(action.angular_z):
-            raise RuntimeError("SmolVLA response contains non-finite Twist values")
+    if not result.action_vectors:
+        raise RuntimeError("SmolVLA response contains no generic actions")
+    for action in result.action_vectors:
+        if not action.values or not all(math.isfinite(value) for value in action.values):
+            raise RuntimeError("SmolVLA response contains an invalid action vector")
     if os.environ.get("SMOLVLA_SMOKE_EXPECT_ZERO", "1") == "1":
-        if any(
-            abs(action.linear_x) > 1e-9 or abs(action.angular_z) > 1e-9
-            for action in result.actions
-        ):
-            raise RuntimeError("default Shadow adapter produced a non-zero Twist candidate")
+        if any(abs(value) > 1e-9 for action in result.action_vectors for value in action.values):
+            raise RuntimeError("default Shadow adapter produced a non-zero action candidate")
     print(f"provider_id={result.provider_id}")
     print(f"model_id={result.model_id}")
-    print(f"action_count={len(result.actions)}")
-    print(f"first_linear_x={result.actions[0].linear_x}")
-    print(f"first_angular_z={result.actions[0].angular_z}")
+    print(f"action_schema={result.action_schema}")
+    print(f"action_features={list(result.action_features)}")
+    print(f"action_count={len(result.action_vectors)}")
+    print(f"first_action={list(result.action_vectors[0].values)}")
     print(f"round_trip_seconds={latency_seconds:.3f}")
     print("SMOLVLA_RUNTIME_SMOKE_PASS")
 

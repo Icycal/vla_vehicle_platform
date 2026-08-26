@@ -48,10 +48,11 @@ def load_mapping(path: Path) -> dict:
         raise ValueError("At least one image feature is required")
     if not mapping.get("state_feature", {}).get("keys"):
         raise ValueError("state_feature.keys is required")
-    if mapping.get("action_feature", {}).get("source") != "target.twist":
-        raise ValueError("Only action source target.twist is currently supported")
-    if not mapping.get("action_feature", {}).get("keys"):
-        raise ValueError("action_feature.keys is required")
+    action_mapping = mapping.get("action_feature", {})
+    if action_mapping.get("source") not in ("target.action", "target.twist"):
+        raise ValueError("action_feature.source must be target.action or target.twist")
+    if action_mapping.get("source") == "target.twist" and not action_mapping.get("keys"):
+        raise ValueError("action_feature.keys is required for target.twist")
     return mapping
 
 
@@ -114,6 +115,39 @@ def find_image(frame: dict, source_key: str, episode_path: Path) -> Path:
     raise ValueError(f"Frame {frame.get('frame_index')} has no image {source_key}")
 
 
+def resolve_action(frame: dict, mapping: dict) -> tuple[str, list[str], list[str], list[float]]:
+    target = frame.get("target", {})
+    if not target.get("available", False):
+        raise ValueError(f"Frame {frame.get('frame_index')} has no training target")
+    action_mapping = mapping["action_feature"]
+    if action_mapping["source"] == "target.twist":
+        twist = target.get("twist", {})
+        names = list(action_mapping["keys"])
+        values = [finite_float(twist[key], f"target.twist.{key}") for key in names]
+        return "vehicle.twist_chunk.v1", names, ["" for _ in names], values
+
+    action = target.get("action")
+    if not isinstance(action, dict):
+        raise ValueError(f"Frame {frame.get('frame_index')} has no generic target.action")
+    schema = str(action.get("schema", ""))
+    expected_schema = str(action_mapping.get("expected_schema", ""))
+    if expected_schema and schema != expected_schema:
+        raise ValueError(
+            f"Frame {frame.get('frame_index')} action schema {schema} does not match {expected_schema}"
+        )
+    names = [str(value) for value in action.get("feature_names", [])]
+    units = [str(value) for value in action.get("feature_units", [])]
+    values = [finite_float(value, f"target.action[{index}]") for index, value in enumerate(action.get("values", []))]
+    if not names or len(names) != len(values):
+        raise ValueError(f"Frame {frame.get('frame_index')} has an invalid action descriptor")
+    if units and len(units) != len(names):
+        raise ValueError(f"Frame {frame.get('frame_index')} has invalid action units")
+    configured_names = action_mapping.get("keys") or names
+    if list(configured_names) != names:
+        raise ValueError(f"Frame {frame.get('frame_index')} action feature order does not match mapping")
+    return schema, names, units or ["" for _ in names], values
+
+
 def build_features(mapping: dict, first_episode: Path, first_frame: dict) -> dict:
     features = {}
     for image_mapping in mapping["image_features"]:
@@ -142,10 +176,11 @@ def build_features(mapping: dict, first_episode: Path, first_frame: dict) -> dic
         }
 
     action_mapping = mapping["action_feature"]
+    _, action_names, _, _ = resolve_action(first_frame, mapping)
     features[action_mapping["target_key"]] = {
         "dtype": "float32",
-        "shape": (len(action_mapping["keys"]),),
-        "names": action_mapping["keys"],
+        "shape": (len(action_names),),
+        "names": action_names,
     }
     features["source.timestamp_ns"] = {
         "dtype": "int64",
@@ -200,15 +235,9 @@ def convert_frame(frame: dict, episode_path: Path, mapping: dict) -> dict:
     if validity_key:
         converted[validity_key] = np.asarray(state_validity, dtype=np.float32)
 
-    target = frame.get("target", {})
-    if not target.get("available", False):
-        raise ValueError(f"Frame {frame.get('frame_index')} has no training target")
-    twist = target.get("twist", {})
     action_mapping = mapping["action_feature"]
-    converted[action_mapping["target_key"]] = np.asarray(
-        [finite_float(twist[key], f"target.twist.{key}") for key in action_mapping["keys"]],
-        dtype=np.float32,
-    )
+    _, _, _, action_values = resolve_action(frame, mapping)
+    converted[action_mapping["target_key"]] = np.asarray(action_values, dtype=np.float32)
     return converted
 
 
@@ -252,6 +281,9 @@ def main() -> int:
                 }
             )
         dataset.finalize()
+        first_action_schema, first_action_names, first_action_units, _ = resolve_action(
+            episodes[0][2][0], mapping
+        )
         conversion_manifest = {
             "schema_version": "vehicle.lerobot.conversion.v1",
             "mapping_schema_version": mapping["schema_version"],
@@ -262,6 +294,13 @@ def main() -> int:
             "frame_count": sum(item["frame_count"] for item in conversion_episodes),
             "features": features,
             "mapping": mapping,
+            "action_descriptor": {
+                "schema": first_action_schema,
+                "features": [
+                    {"index": index, "name": name, "unit": first_action_units[index]}
+                    for index, name in enumerate(first_action_names)
+                ],
+            },
             "episodes": conversion_episodes,
         }
         with (temporary_path / "vehicle_conversion_manifest.json").open(
