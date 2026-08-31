@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+  <meta name="theme-color" content="#07111d">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>赤兔遥控 · Chitu Teleop</title>
+  <link rel="icon" href="/favicon.svg">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="stylesheet" href="/assets/teleop.css?v=20260831-camera">
+</head>
+<body>
+  <header class="teleop-header">
+    <a class="teleop-brand" href="/" aria-label="返回赤兔控制台">
+      <img src="/assets/chitu-mark.svg" alt="">
+      <span><strong>赤兔遥控</strong><small>CHITU MOBILE TELEOP</small></span>
+    </a>
+    <div class="header-status">
+      <span class="status-chip warning" id="networkChip"><i></i>连接中</span>
+      <button class="icon-action" id="openSettings" aria-label="打开设置">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.09a2 2 0 0 1 1 1.74v.5a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2Z"/><circle cx="12" cy="12" r="3"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <main class="teleop-shell">
+    <section class="camera-panel" id="cameraPanel" aria-label="前视相机">
+      <img id="teleopCamera" alt="车辆前视相机">
+      <div class="camera-placeholder" id="cameraPlaceholder">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h3l1.5-2h7L17 7h3v11H4V7Zm8 2.2a3.3 3.3 0 1 0 0 6.6 3.3 3.3 0 0 0 0-6.6Z"/></svg>
+        <strong>等待前视相机</strong><span>请在组件控制中启动相机</span>
+      </div>
+      <div class="camera-grid" aria-hidden="true"></div>
+      <div class="camera-topline">
+        <span class="live-badge"><i></i>LIVE</span>
+        <div class="camera-topline-actions">
+          <span id="cameraTime">--:--:--</span>
+          <button class="camera-mode-toggle" id="cameraModeToggle" type="button" aria-pressed="false" aria-label="将相机切换为悬浮窗口">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h7v2H6v5H4V5Zm9 0h7v7h-2V7h-5V5ZM4 14h2v3h5v2H4v-5Zm14 0h2v5h-7v-2h5v-3Z"/></svg>
+            <span id="cameraModeLabel">悬浮</span>
+          </button>
+        </div>
+      </div>
+      <div class="camera-float-grip" aria-hidden="true"></div>
+      <div class="camera-readout">
+        <div><small>控制模式</small><strong id="modeReadout">--</strong></div>
+        <div><small>实际速度</small><strong><span id="executedLinear">0.00</span> m/s</strong></div>
+        <div><small>实际转向</small><strong><span id="executedAngular">0.00</span> rad/s</strong></div>
+      </div>
+    </section>
+
+    <section class="status-row" aria-label="系统状态">
+      <article><span class="status-icon" data-tone="blue"></span><div><small>底盘</small><strong id="chassisState">读取中</strong></div></article>
+      <article><span class="status-icon" data-tone="green"></span><div><small>遥控租约</small><strong id="leaseState">未接管</strong></div></article>
+      <article><span class="status-icon" data-tone="orange"></span><div><small>数据采集</small><strong id="episodeState">未记录</strong></div></article>
+    </section>
+
+    <section class="drive-layout">
+      <article class="control-panel">
+        <div class="panel-heading">
+          <div><small>TOUCH DRIVE</small><h1>车辆控制</h1></div>
+          <span class="lease-countdown" id="leaseCountdown">--</span>
+        </div>
+
+        <div class="joystick-wrap">
+          <div class="axis-label axis-forward">前进</div>
+          <div class="axis-label axis-left">左转</div>
+          <div class="axis-label axis-right">右转</div>
+          <div class="axis-label axis-reverse">后退</div>
+          <div class="joystick disabled" id="joystick" role="application" aria-label="车辆方向摇杆">
+            <div class="joystick-rings"></div>
+            <div class="joystick-knob" id="joystickKnob"><span></span></div>
+          </div>
+          <p class="deadman-hint" id="deadmanHint">取得控制权后，按住摇杆才会运动；松手立即归零</p>
+        </div>
+
+        <div class="command-preview">
+          <div><small>前后</small><strong id="linearPreview">0%</strong></div>
+          <div class="command-vector"><span id="vectorDot"></span></div>
+          <div><small>转向</small><strong id="angularPreview">0%</strong></div>
+        </div>
+
+        <label class="safety-confirm">
+          <input type="checkbox" id="safetyConfirmed">
+          <span><b>车辆周围安全，可以开始遥控</b><small>确认车辆已架空或处于可控空旷区域</small></span>
+        </label>
+        <div class="control-actions">
+          <button class="button primary" id="acquireLease">申请控制权</button>
+          <button class="button secondary" id="releaseLease" disabled>释放控制权</button>
+        </div>
+      </article>
+
+      <aside class="side-stack">
+        <article class="data-panel">
+          <div class="panel-heading compact"><div><small>TRAINING EPISODE</small><h2>训练数据采集</h2></div><span class="record-light" id="recordLight"></span></div>
+          <label>任务描述<textarea id="episodeTask" rows="3" placeholder="例如：沿通道缓慢前进，在纸箱前停车"></textarea></label>
+          <label>操作员<input id="operatorId" value="mobile_operator" autocomplete="name"></label>
+          <div class="episode-metrics">
+            <div><small>时长</small><strong id="episodeElapsed">0.0 s</strong></div>
+            <div><small>图像</small><strong id="episodeImages">0</strong></div>
+            <div><small>消息</small><strong id="episodeMessages">0</strong></div>
+          </div>
+          <div class="episode-actions">
+            <button class="button primary" id="startEpisode">开始采集</button>
+            <button class="button success" id="finishEpisode" disabled>完成并保存</button>
+            <button class="button ghost-danger" id="discardEpisode" disabled>丢弃本次</button>
+          </div>
+          <p class="data-note">同步记录图像、车辆状态、候选命令、安全处理后的实际 Action。</p>
+        </article>
+
+        <article class="setup-panel">
+          <div class="panel-heading compact"><div><small>VEHICLE READY</small><h2>运行准备</h2></div></div>
+          <div class="setup-list">
+            <div><span>运行时核心</span><strong id="runtimeState">--</strong></div>
+            <div><span>Observation</span><strong id="observationState">--</strong></div>
+            <div><span>前视相机</span><strong id="cameraState">--</strong></div>
+            <div><span>车辆底盘</span><strong id="chassisDetailState">--</strong></div>
+          </div>
+          <button class="button secondary full" id="startChassis">启动底盘组件</button>
+        </article>
+      </aside>
+    </section>
+  </main>
+
+  <button class="emergency-stop" id="emergencyStop">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h10l4 4v10l-4 4H7l-4-4V7l4-4Zm2.2 6.2v5.6h5.6V9.2H9.2Z"/></svg>
+    <span><strong>紧急停车</strong><small>SAFE STOP</small></span>
+  </button>
+
+  <div class="sheet-backdrop" id="settingsBackdrop" hidden></div>
+  <aside class="settings-sheet" id="settingsSheet" aria-hidden="true">
+    <div class="sheet-handle"></div>
+    <div class="panel-heading"><div><small>OPERATOR ACCESS</small><h2>遥控设置</h2></div><button class="icon-action" id="closeSettings" aria-label="关闭设置">×</button></div>
+    <label>Operator Token<input id="tokenInput" type="password" autocomplete="off" placeholder="输入 Vehicle Ops 操作令牌"></label>
+    <label>最大前进速度 <output id="linearLimitValue">0.25 m/s</output><input id="linearLimit" type="range" min="0.05" max="0.40" value="0.25" step="0.01"></label>
+    <label>最大转向速度 <output id="angularLimitValue">0.50 rad/s</output><input id="angularLimit" type="range" min="0.10" max="0.80" value="0.50" step="0.05"></label>
+    <button class="button primary full" id="saveSettings">保存设置</button>
+    <p class="settings-note">令牌只保存在当前浏览器会话。速度上限同时受 Teleop Gateway 和 Safety Guard 限制。</p>
+  </aside>
+
+  <div class="toast" id="teleopToast" role="status" aria-live="polite"></div>
+  <script src="/assets/teleop.js?v=20260831-camera"></script>
+</body>
+</html>

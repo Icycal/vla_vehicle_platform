@@ -194,12 +194,15 @@ ssh -L 8088:127.0.0.1:8088 wheeltec@10.101.70.232
 
 Job API 的读写请求和其他写请求必须携带 `X-Ops-Token`。API 不提供任意 Topic 发布、任意 Service 调用、任意文件读取或 Shell 执行能力。
 
+
+手机局域网遥控和训练数据采集说明见 `docs/MOBILE_TELEOP.md`。
+
 ## 安全限制
 
 - 当前 HTTP 服务没有 TLS，只允许在可信车辆局域网或 SSH 隧道内使用；
 - Operator Token 不得提交到 Git、截图公开或放入 URL；
 - 页面不提供 MANUAL、NAV2、VLA_ASSISTED 或 AUTONOMOUS 模式切换；
-- 页面不提供手机方向控制，后续必须通过独立 Control Lease 和 Deadman 机制实现；
+- 手机方向控制由独立 `/teleop` 页面提供，必须经过 Control Lease、Deadman、Mux 和 Safety Guard；
 - 页面不启动 `wheeltec_robot_node`，也不访问 STM32 串口；
 - VLA 仍不能发布最终 `/cmd_vel`。
 

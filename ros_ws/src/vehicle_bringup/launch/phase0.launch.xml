@@ -10,6 +10,9 @@
   <node pkg="vehicle_runtime" exec="vehicle_supervisor" name="vehicle_supervisor" output="screen">
     <param from="$(var params_file)"/>
   </node>
+  <node pkg="vehicle_runtime" exec="vehicle_teleop_gateway" name="vehicle_teleop_gateway" output="screen">
+    <param from="$(var params_file)"/>
+  </node>
   <node pkg="vehicle_runtime" exec="vla_policy_gateway" name="vla_policy_gateway" output="screen">
     <param from="$(var params_file)"/>
     <param from="$(var policy_params_file)"/>

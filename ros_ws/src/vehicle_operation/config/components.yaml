@@ -2,6 +2,7 @@ operation_orchestrator:
   ros__parameters:
     component_ids:
       - front_camera
+      - vehicle_chassis
       - runtime_core
       - observation_pipeline
       - vla_debug_pipeline
@@ -12,11 +13,17 @@ operation_orchestrator:
     components.front_camera.log_path: "front_camera.log"
     components.front_camera.expected_nodes: ["front_camera", "front_camera_compressor"]
     components.front_camera.health_topics: ["/camera/image_compressed"]
+    components.vehicle_chassis.display_name: "车辆底盘"
+    components.vehicle_chassis.group_name: "执行机构"
+    components.vehicle_chassis.unit: "vla-vehicle-chassis.service"
+    components.vehicle_chassis.log_path: "vehicle_chassis.log"
+    components.vehicle_chassis.expected_nodes: ["vehicle_chassis_driver"]
+    components.vehicle_chassis.health_topics: ["/odom", "/imu/data_raw"]
     components.runtime_core.display_name: "车辆运行时核心"
     components.runtime_core.group_name: "运行时"
     components.runtime_core.unit: "vla-runtime-core.service"
     components.runtime_core.log_path: "runtime_core.log"
-    components.runtime_core.expected_nodes: ["vehicle_supervisor", "vla_policy_gateway", "vla_action_runtime", "vla_control_mux", "vla_safety_guard"]
+    components.runtime_core.expected_nodes: ["vehicle_supervisor", "vehicle_teleop_gateway", "vla_policy_gateway", "vla_action_runtime", "vla_control_mux", "vla_safety_guard"]
     components.runtime_core.health_topics: ["/vehicle/system_state"]
     components.observation_pipeline.display_name: "Observation 链路"
     components.observation_pipeline.group_name: "数据链路"

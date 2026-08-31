@@ -20,6 +20,17 @@ WheelTec Vendor 驱动继续负责串口协议、校验、里程计、IMU 和电
 
 ## 内置插件
 
+插件按模型动作协议选择，不按车辆名称选择：
+
+| 模型 Action Schema | 应选择插件 |
+|---|---|
+| `vehicle.twist_chunk.v1` | `chitu.mobility.twist` |
+| `chitu.action.differential.v1` | `chitu.mobility.twist` |
+| `chitu.action.mecanum.v1` | `chitu.mobility.twist` |
+| `chitu.action.ackermann.v1` | `chitu.mobility.ackermann` |
+
+因此，阿克曼车型如果采集和训练的是 `linear_x + angular_z`，仍应使用 Twist 插件。只有模型直接输出 `speed_mps + steering_angle_rad` 时才使用 Ackermann 插件。模型管理页面会自动显示推荐插件；选错时禁用激活，API 和激活脚本也会再次拒绝。
+
 ```bash
 ./scripts/mobility_plugin.sh list
 ./scripts/mobility_plugin.sh show chitu.mobility.ackermann

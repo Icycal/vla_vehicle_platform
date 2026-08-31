@@ -1,6 +1,16 @@
 vehicle_supervisor:
   ros__parameters: {}
 
+vehicle_teleop_gateway:
+  ros__parameters:
+    maximum_lease_seconds: 30.0
+    minimum_lease_seconds: 3.0
+    command_timeout_seconds: 0.3
+    maximum_linear_velocity: 0.4
+    maximum_angular_velocity: 0.8
+    publish_frequency: 20.0
+    output_frame: base_link
+    output_topic: /mobile_teleop/cmd_vel
 vla_policy_gateway:
   ros__parameters:
     transport: mock

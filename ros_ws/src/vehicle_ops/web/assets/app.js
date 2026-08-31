@@ -1,5 +1,5 @@
-const $ = (id) => document.getElementById(id);
-const state = { datasetCatalog: { episodes: [], exports: [], lerobot: [], archives: [] }, datasetFailureLogJobId: "", datasetFailureLog: "", selectedLerobotPath: "", token: sessionStorage.getItem("vehicleOpsToken") || "", cameraSequence: 0, pipelineCameraSequence: 0, cameraStatus: null, pipelineCameraActive: false, selectedJobId: "", jobs: [], debugRunId: "", debugResult: null, debugImageUrls: {}, pipelineTrace: null, pipelineHistory: [], selectedPipelineStageId: "", selectedPipelineHistoryId: "", inspectorMode: "live", components: [], componentProfiles: [], selectedComponentId: "", storage: null, storageItems: [], selectedStorageCategory: "", systemMode: "", policyStatus: null, systemStatus: null, runtimeSwitchJobId: "", runtimeSwitchTarget: "", runtimeSwitchNotified: false, debugInputSource: "camera", debugUpload: null, observationWidth: 640, observationHeight: 480 };
+﻿const $ = (id) => document.getElementById(id);
+const state = { mobilityPlugins: [], modelCatalog: { mobility: { plugins: [], active_plugin_id: "" }, models: [] }, datasetCatalog: { episodes: [], exports: [], lerobot: [], archives: [] }, datasetFailureLogJobId: "", datasetFailureLog: "", selectedLerobotPath: "", token: sessionStorage.getItem("vehicleOpsToken") || "", cameraSequence: 0, pipelineCameraSequence: 0, cameraStatus: null, pipelineCameraActive: false, selectedJobId: "", jobs: [], debugRunId: "", debugResult: null, debugImageUrls: {}, pipelineTrace: null, pipelineHistory: [], selectedPipelineStageId: "", selectedPipelineHistoryId: "", inspectorMode: "live", components: [], componentProfiles: [], selectedComponentId: "", storage: null, storageItems: [], selectedStorageCategory: "", systemMode: "", policyStatus: null, systemStatus: null, runtimeSwitchJobId: "", runtimeSwitchTarget: "", runtimeSwitchNotified: false, debugInputSource: "camera", debugUpload: null, observationWidth: 640, observationHeight: 480 };
 const text = (id, value) => { $(id).textContent = value ?? "—"; };
 const number = (value, digits = 1) => Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : "--";
 const milliseconds = (value) => {
@@ -134,12 +134,21 @@ function updateDebugModeGuard(system) {
   const mode = system?.mode_name || "UNKNOWN";
   const received = Boolean(system?.received);
   const shadowReady = received && mode === "VLA_SHADOW";
+  const assistedReady = received && mode === "VLA_ASSISTED";
+  const policyReady = state.policyStatus?.state_name === "READY";
   state.systemMode = mode;
-  $("debugModeGuard").dataset.state = shadowReady ? "ready" : (received ? "blocked" : "unknown");
-  text("debugModeState", shadowReady ? "VLA_SHADOW · 已允许快照调试" : `${mode} · 尚未进入影子模式`);
-  text("debugModeHint", shadowReady ? "模型输出仅用于观察与对照，不会发布底盘控制命令" : "进入影子模式后才能冻结 Observation 并执行单步推理");
-  $("enterShadowMode").disabled = !received || shadowReady;
-  $("enterShadowMode").textContent = shadowReady ? "已处于影子模式" : "进入影子调试模式";
+  $("debugModeGuard").dataset.state = shadowReady || assistedReady ? "ready" : (received ? "blocked" : "unknown");
+  text("debugModeState", shadowReady ? "VLA_SHADOW \u00b7 \u9884\u89c8\u6a21\u5f0f" : assistedReady ? "VLA_ASSISTED \u00b7 \u5355\u6b65\u6267\u884c\u6a21\u5f0f" : `${mode} \u00b7 \u5c1a\u672a\u9009\u62e9\u8c03\u8bd5\u6a21\u5f0f`);
+  text("debugModeHint", shadowReady ? (policyReady ? "\u53ef\u51bb\u7ed3 Observation\u3001\u9884\u5904\u7406\u548c\u63a8\u7406\uff1b\u786e\u8ba4\u8f93\u51fa\u540e\u53ef\u8fdb\u5165\u5355\u6b65\u6a21\u5f0f" : "\u5f71\u5b50\u6a21\u5f0f\u53ef\u6b63\u5e38\u9884\u89c8\uff1b\u5f53\u524d Provider \u6216\u6a21\u578b\u5c1a\u672a\u5c31\u7eea\uff0c\u6682\u4e0d\u80fd\u8fdb\u5165\u5355\u6b65\u6a21\u5f0f") : assistedReady ? "\u53ef\u6267\u884c\u5df2\u786e\u8ba4\u7684\u5355\u6b65\u547d\u4ee4\uff1b\u547d\u4ee4\u4ecd\u7ecf\u8fc7 Control Mux \u548c Safety Guard" : "\u5148\u8fdb\u5165\u5f71\u5b50\u6a21\u5f0f\u8fdb\u884c\u9884\u89c8\uff0c\u786e\u8ba4\u6a21\u578b\u548c\u63d2\u4ef6\u8f93\u51fa\u540e\u518d\u8fdb\u5165\u5355\u6b65\u6267\u884c\u6a21\u5f0f");
+  $("enterShadowMode").disabled = !received || (shadowReady && !policyReady);
+  $("enterShadowMode").textContent = shadowReady ? (policyReady ? "\u8fdb\u5165\u5355\u6b65\u6267\u884c\u6a21\u5f0f" : "\u7b49\u5f85\u7b56\u7565\u5c31\u7eea") : assistedReady ? "\u8fd4\u56de\u5f71\u5b50\u6a21\u5f0f" : "\u8fdb\u5165\u5f71\u5b50\u8c03\u8bd5\u6a21\u5f0f";
+  const executeControl = $("debugExecutionControl");
+  if (executeControl) executeControl.style.display = assistedReady ? "grid" : "none";
+  const executeToggle = $("debugExecuteCommand");
+  if (executeToggle) {
+    executeToggle.disabled = !assistedReady;
+    if (!assistedReady) executeToggle.checked = false;
+  }
 }
 function policyRuntimeType(policy) {
   const provider = String(policy?.provider_id || "").toLowerCase();
@@ -624,13 +633,50 @@ async function createJob(jobType, parameters = {}) {
   toast(`任务已提交：${job.job_type}`);
   await refreshJobs(true);
 }
+function modelPlugin(pluginId) {
+  return (state.modelCatalog.mobility?.plugins || []).find((plugin) => plugin.id === pluginId) || null;
+}
+function modelPluginName(pluginId) {
+  const plugin = modelPlugin(pluginId);
+  return plugin?.display_name || pluginId || "未激活";
+}
+function modelCompatibilityText(compatibility) {
+  const labels = {
+    compatible: ["兼容", "当前插件可以安全解释该模型输出。"],
+    incompatible: ["插件不兼容", "当前插件不能解释该模型 Action Schema，请切换到推荐插件。"],
+    no_active_plugin: ["尚未激活插件", "激活模型前必须先激活一个兼容的 Mobility Plugin。"],
+    unsupported_schema: ["没有可用插件", "当前平台没有插件支持该模型 Action Schema。"],
+    missing_action_descriptor: ["动作协议未知", "模型缺少 Action Descriptor，激活后只能使用 Zero Adapter，不会输出真实控制。"],
+    invalid_action_descriptor: ["动作清单无效", "模型 Action Descriptor 缺少 Schema，禁止激活。"],
+    manifest_error: ["模型清单损坏", "无法读取 vehicle_model_manifest.json，禁止激活。"]
+  };
+  return labels[compatibility?.status] || ["待检查", "等待模型与插件兼容性检查。"];
+}
+function updateModelCompatibilitySummary(result) {
+  const summary = $("modelCompatibilitySummary");
+  const activeId = result.mobility?.active_plugin_id || "";
+  const plugin = modelPlugin(activeId);
+  summary.className = `model-compatibility-overview ${activeId ? "ready" : "warning"}`;
+  summary.innerHTML = activeId
+    ? `<strong>当前动作插件：${escapeHtml(modelPluginName(activeId))}</strong><span>${escapeHtml(plugin?.selection_hint || "系统将根据模型 Action Schema 判断兼容性。")}</span>`
+    : `<strong>尚未激活 Mobility Plugin</strong><span>带 Action Descriptor 的训练模型暂时不能激活，请先选择系统推荐插件。</span>`;
+}
 function modelCard(model) {
   const card = document.createElement("div");
   const manifest = model.manifest || {};
+  const action = manifest.action || {};
+  const compatibility = model.compatibility || {};
+  const [statusTitle, statusDescription] = modelCompatibilityText(compatibility);
+  const recommended = (compatibility.recommended_plugin_ids || []).map(modelPluginName);
+  const features = (action.features || []).slice().sort((left, right) => Number(left.index) - Number(right.index));
+  const featureText = features.length ? features.map((feature) => `${feature.name}${feature.unit ? ` [${feature.unit}]` : ""}`).join(" · ") : "未声明";
+  const canActivate = model.activatable && !model.active && model.valid && compatibility.activation_allowed !== false;
+  const blockedButton = model.activatable && !model.active && model.valid && !canActivate;
+  const statusClass = compatibility.status === "compatible" ? "ready" : compatibility.status === "missing_action_descriptor" ? "warning" : "blocked";
   card.className = `model-item${model.active ? " active" : ""}${model.valid ? "" : " invalid"}`;
-  card.innerHTML = `<div><strong>${escapeHtml(model.provider)} / ${escapeHtml(model.version)}${model.active ? " \u00b7 \u5f53\u524d" : ""}</strong><small>${escapeHtml(manifest.model_id || "\u672c\u5730\u6a21\u578b")} @ ${escapeHtml(manifest.revision || "--")} \u00b7 ${formatBytes(model.bytes)}</small><span>\u8bad\u7ec3\u6570\u636e\uff1a${escapeHtml(manifest.dataset_id || "\u672a\u5173\u8054")}</span></div>${model.activatable && !model.active && model.valid ? '<button class="button secondary compact-button" data-model-activate>\u6fc0\u6d3b</button>' : ""}`;
+  card.innerHTML = `<div class="model-main"><strong>${escapeHtml(model.provider)} / ${escapeHtml(model.version)}${model.active ? " · 当前" : ""}</strong><small>${escapeHtml(manifest.model_id || "本地模型")} @ ${escapeHtml(manifest.revision || "--")} · ${formatBytes(model.bytes)}</small><span>训练数据：${escapeHtml(manifest.dataset_id || "未关联")}</span><div class="model-action-contract"><span><b>Action Schema</b>${escapeHtml(compatibility.action_schema || "未声明")}</span><span><b>输出字段</b>${escapeHtml(featureText)}</span><span><b>当前插件</b>${escapeHtml(modelPluginName(compatibility.active_plugin_id))}</span><span><b>推荐插件</b>${escapeHtml(recommended.join("、") || "无")}</span></div><div class="model-compatibility ${statusClass}"><strong>${escapeHtml(statusTitle)}</strong><span>${escapeHtml(statusDescription)}</span></div></div><div class="model-actions">${canActivate ? '<button class="button secondary compact-button" data-model-activate>激活</button>' : ""}${blockedButton ? '<button class="button secondary compact-button" disabled title="模型 Action Schema 与当前插件不兼容">无法激活</button>' : ""}</div>`;
   card.querySelector("[data-model-activate]")?.addEventListener("click", async () => {
-    if (!confirm(`\u786e\u8ba4\u6fc0\u6d3b\u6a21\u578b ${model.version}\uff1f\n\n\u7cfb\u7edf\u5c06\u91cd\u542f SmolVLA Runtime\uff1b\u5931\u8d25\u65f6\u81ea\u52a8\u6062\u590d\u4e0a\u4e00\u7248\u672c\u3002`)) return;
+    if (!confirm(`确认激活模型 ${model.version}？\n\nAction Schema：${compatibility.action_schema || "未声明"}\n当前插件：${modelPluginName(compatibility.active_plugin_id)}\n\n系统将重启 SmolVLA Runtime；失败时自动恢复上一版本。`)) return;
     try { await createJob("policy.model_activate", {provider: model.provider, version: model.version}); }
     catch (error) { toast(error.message, true); if (!state.token) openToken(); }
   });
@@ -639,6 +685,8 @@ function modelCard(model) {
 async function refreshModels(showError = false) {
   try {
     const result = await fetch("/api/models", {cache: "no-store"}).then(async (response) => { const data = await response.json(); if (!response.ok) throw new Error(data.message || `HTTP ${response.status}`); return data; });
+    state.modelCatalog = result;
+    updateModelCompatibilitySummary(result);
     const list = $("modelList"); list.replaceChildren();
     if (!(result.models || []).length) list.innerHTML = '<div class="job-empty"><strong>\u5c1a\u65e0\u6a21\u578b</strong><span>\u4f7f\u7528\u4e0a\u65b9\u8868\u5355\u5b89\u88c5\u7b2c\u4e00\u4e2a\u7248\u672c</span></div>';
     else (result.models || []).forEach((model) => list.appendChild(modelCard(model)));
@@ -1052,11 +1100,12 @@ function showDebugError(error) {
   $("inferenceDebug").disabled = busy || !state.debugRunId;
 }
 function setDebugStage(stage, label, stateClass = "running") {
-  const stages = ["Capture", "Contract", "Preprocess", "Inference", "Denormalize", "Adapter", "Safety"];
-  const activeIndex = ({ capture: 0, preprocess: 2, inference: 3 })[stage] ?? 0;
-  const completedIndex = stateClass === "succeeded" ? ({ capture: 1, preprocess: 2, inference: 6 })[stage] : activeIndex - 1;
+  const stages = ["Capture", "Preprocess", "Inference", "Denormalize", "Schema", "Plugin", "Mux", "Safety", "Final"];
+  const activeIndex = ({ capture: 0, preprocess: 1, inference: 2 })[stage] ?? 0;
+  const completedIndex = stateClass === "succeeded" ? ({ capture: 0, preprocess: 1, inference: 8 })[stage] : activeIndex - 1;
   stages.forEach((name, index) => {
     const node = $("debugStep" + name);
+    if (!node) return;
     node.classList.toggle("active", stateClass === "running" && index === activeIndex);
     node.classList.toggle("completed", index <= completedIndex);
     node.classList.toggle("failed", stateClass === "failed" && index === activeIndex);
@@ -1154,11 +1203,95 @@ async function loadDebugImage(kind, imageId, emptyId) {
   }
   $(emptyId).style.display = "none";
 }
+async function loadMobilityPlugins() {
+  const select = $("debugMobilityPlugin");
+  if (!select) return;
+  try {
+    const response = await fetch("/api/mobility/plugins", { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    state.mobilityPlugins = await response.json();
+    state.mobilityPlugins.forEach((plugin) => {
+      const option = document.createElement("option");
+      option.value = plugin.id;
+      option.textContent = `${plugin.id} · ${plugin.runtime_adapter || "adapter"}`;
+      select.appendChild(option);
+    });
+    updateMobilityPluginInfo();
+  } catch (error) {
+    const info = $("debugMobilityPluginInfo");
+    if (info) info.textContent = `插件列表读取失败：${error.message}`;
+  }
+}
+function updateMobilityPluginInfo() {
+  const select = $("debugMobilityPlugin");
+  const info = $("debugMobilityPluginInfo");
+  if (!select || !info) return;
+  const plugin = state.mobilityPlugins.find((item) => item.id === select.value);
+  if (!plugin) {
+    info.textContent = "自动跟随模型 Schema；单步调试只做转换预览，不改变正式运行插件。";
+    return;
+  }
+  const accepts = (plugin.accepts || []).map((item) => item.schema).filter(Boolean).join(", ");
+  info.textContent = `${plugin.runtime_adapter || "adapter"} · 支持输入：${accepts || "未声明"} · 仅预览，不发布控制命令`;
+}function debugJsonValue(value) {
+  if (value === undefined || value === null) return "--";
+  return JSON.stringify(value, null, 2);
+}
+function renderDebugSteps(result) {
+  const preprocessing = result.preprocessing || null;
+  const modelInputs = preprocessing?.model_inputs || null;
+  const normalized = result.raw_output?.normalized_action_chunk || null;
+  const denormalized = result.raw_output?.denormalized_actions || null;
+  const interpreted = result.interpreted_output || null;
+  const plugin = result.mobility_plugin || null;
+  const command = plugin?.commands?.[0] || null;
+  const execution = result.single_step_execution || { executed: false, message: "Preview only" };
+  const latency = result.latency_ms || {};
+  const stages = [
+    { number: 1, title: "\u51bb\u7ed3\u8f93\u5165 / Frozen Observation", input: { observation: result.observation || null }, output: { observation: result.observation || null }, time: null },
+    { number: 2, title: "\u9884\u5904\u7406 / Preprocess", input: { observation: result.observation || null }, output: preprocessing, time: latency.preprocessing },
+    { number: 3, title: "\u6a21\u578b\u63a8\u7406 / Inference", input: { model_inputs: modelInputs }, output: normalized, time: latency.inference },
+    { number: 4, title: "\u53cd\u5f52\u4e00\u5316 / Denormalize", input: normalized, output: denormalized, time: latency.postprocessing },
+    { number: 5, title: "Action Schema \u7ed1\u5b9a / Schema Binding", input: denormalized, output: interpreted, time: null },
+    { number: 6, title: `\u8f66\u578b\u63d2\u4ef6\u8f6c\u6362 / Mobility Plugin \u00b7 ${plugin?.plugin_id || "\u672a\u9009\u62e9"}`, input: interpreted, output: plugin, time: null },
+    { number: 7, title: "\u63a7\u5236\u4ef2\u88c1\u9884\u89c8 / Control Mux", input: { mobility_command: command }, output: { selected_source: "vla", command, published: false }, time: null },
+    { number: 8, title: "\u5b89\u5168\u8fb9\u754c\u9884\u89c8 / Safety Guard", input: { selected_command: command }, output: { command, executed: execution.executed, safety_chain: "preview-only" }, time: null },
+    { number: 9, title: "\u6700\u7ec8\u547d\u4ee4\u9884\u89c8 / Final cmd_vel", input: { safety_output: command }, output: { command, sent: execution.executed, execution }, time: null }
+  ];
+  const container = $("debugStageDetails");
+  if (!container) return;
+  container.replaceChildren();
+  stages.forEach((stage) => {
+    const details = document.createElement("details");
+    details.className = "debug-stage-item";
+    details.open = stage.number <= (result.stage === "preprocess" ? 2 : 9);
+    const summary = document.createElement("summary");
+    const badge = document.createElement("span"); badge.className = "debug-stage-number"; badge.textContent = String(stage.number);
+    const title = document.createElement("strong"); title.textContent = stage.title;
+    const timing = document.createElement("small"); timing.textContent = stage.time === null || stage.time === undefined ? "\u672a\u5355\u72ec\u8ba1\u65f6" : `${milliseconds(stage.time)} ms`;
+    summary.append(badge, title, timing); details.appendChild(summary);
+    const body = document.createElement("div"); body.className = "debug-stage-io";
+    [["\u8f93\u5165 / INPUT", stage.input], ["\u8f93\u51fa / OUTPUT", stage.output]].forEach(([label, value]) => {
+      const block = document.createElement("div"); block.className = "debug-stage-block";
+      const heading = document.createElement("span"); heading.textContent = label;
+      const code = document.createElement("pre"); code.textContent = debugJsonValue(value);
+      block.append(heading, code); body.appendChild(block);
+    });
+    details.appendChild(body); container.appendChild(details);
+  });
+}
 function renderDebugResult(result) {
   state.debugResult = result;
   $("debugJson").textContent = JSON.stringify(result, null, 2);
+  renderDebugSteps(result);
   $("copyDebugJson").disabled = false;
   text("debugProvider", `${result.provider_id || "--"} / ${result.model_id || "--"}`);
+  const plugin = result.mobility_plugin;
+  const pluginTitle = plugin?.plugin_id ? `车型插件转换 / Mobility Plugin · ${plugin.plugin_id}` : "车型插件转换 / Mobility Plugin";
+  const stageTitle = $("debugStageDetails")?.querySelector?.(".debug-stage-item:nth-child(7) summary strong");
+  if (stageTitle) stageTitle.textContent = pluginTitle;
+  const pluginInfo = $("debugMobilityPluginInfo");
+  if (pluginInfo && plugin) pluginInfo.textContent = `${plugin.plugin_id || "插件"} · ${plugin.compatible ? "已完成转换预览" : (plugin.message || "不兼容当前 Action Schema")}`;
   text("debugLatency", `${milliseconds(result.latency_ms?.total)} ms`);
   const normalized = result.raw_output?.normalized_action_chunk;
   const denormalized = result.raw_output?.denormalized_actions?.values || [];
@@ -1207,10 +1340,30 @@ async function enterShadowDebugMode() {
     button.textContent = "重新进入影子模式";
   }
 }
+async function switchDebugMode() {
+  if (!state.token) { openToken(); throw new Error("\u8bf7\u5148\u586b\u5199\u64cd\u4f5c\u4ee4\u724c"); }
+  const assisted = state.systemMode === "VLA_ASSISTED";
+  const target = assisted ? "\u5f71\u5b50\u8c03\u8bd5" : "\u5355\u6b65\u6267\u884c";
+  if (!confirm(`\u786e\u8ba4\u5207\u6362\u5230${target}\u6a21\u5f0f\uff1f`)) return;
+  const button = $("enterShadowMode");
+  button.disabled = true;
+  clearDebugError();
+  try {
+    const endpoint = assisted ? "/api/vla-debug/enter-shadow" : "/api/vla-debug/enter-single-step";
+    const result = await jobFetch(endpoint, { method: "POST" });
+    toast(result.message || `\u5df2\u5207\u6362\u5230${target}\u6a21\u5f0f`);
+    await refresh();
+  } catch (error) {
+    showDebugError(error);
+    toast(error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+}
 async function captureDebugObservation() {
   clearDebugError();
-  if (state.systemMode !== "VLA_SHADOW") {
-    throw new Error(`当前为 ${state.systemMode || "UNKNOWN"} 模式，请先点击“进入影子调试模式”`);
+  if (!["VLA_SHADOW", "VLA_ASSISTED"].includes(state.systemMode)) {
+    throw new Error("Current mode is not available for debug capture");
   }
   if (state.debugInputSource === "camera" && state.cameraStatus?.content_analyzed && !state.cameraStatus?.content_valid) {
     throw new Error("前视相机正在持续输出近乎全黑的画面，请检查镜头遮挡、USB 连接，或在组件控制中重启前视相机");
@@ -1251,7 +1404,14 @@ async function runDebugStage(stage) {
   try {
     const response = await jobFetch("/api/vla-debug/run", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ run_id: state.debugRunId, stage })
+      body: JSON.stringify({
+        run_id: state.debugRunId,
+        stage,
+        mobility_plugin_id: $("debugMobilityPlugin")?.value || "",
+        execute_command: stage === "inference" && Boolean($("debugExecuteCommand")?.checked),
+        operator_confirmation: stage === "inference" && $("debugExecuteCommand")?.checked ? "I_CONFIRM_SINGLE_STEP" : "",
+        execution_duration_ms: Number($("debugExecutionDuration")?.value || 150)
+      })
     });
     renderDebugResult(response.result);
     await loadDebugImage("processed", "debugProcessedImage", "debugProcessedEmpty");
@@ -1389,7 +1549,7 @@ $("debugUploadDropzone").addEventListener("drop", async (event) => {
 });
 setDebugInputSource("camera");
 $("enterShadowMode").addEventListener("click", () => {
-  enterShadowDebugMode().catch((error) => { showDebugError(error); toast(error.message, true); });
+  switchDebugMode().catch((error) => { showDebugError(error); toast(error.message, true); });
 });
 $("captureDebug").addEventListener("click", async () => {
   try { await captureDebugObservation(); } catch (error) { setDebugStage("capture", "执行失败", "failed"); showDebugError(error); toast(error.message, true); setDebugBusy(false); }
@@ -1398,8 +1558,12 @@ $("preprocessDebug").addEventListener("click", async () => {
   try { await runDebugStage("preprocess"); } catch (error) { setDebugStage("preprocess", "执行失败", "failed"); showDebugError(error); toast(error.message, true); setDebugBusy(false); }
 });
 $("inferenceDebug").addEventListener("click", async () => {
-  if (!confirm("确认执行一次 VLA 推理？结果只用于 Shadow 调试，不会发布控制命令。")) return;
-  try { await runDebugStage("inference"); } catch (error) { setDebugStage("inference", "执行失败", "failed"); showDebugError(error); toast(error.message, true); setDebugBusy(false); }
+  const execute = Boolean($("debugExecuteCommand")?.checked);
+  const prompt = execute
+    ? "Confirm sending one single-step vehicle command? Ensure the vehicle area is safe."
+    : "Confirm one VLA inference? Preview only; no vehicle command will be published.";
+  if (!confirm(prompt)) return;
+  try { await runDebugStage("inference"); } catch (error) { setDebugStage("inference", "????", "failed"); showDebugError(error); toast(error.message, true); setDebugBusy(false); }
 });
 $("copyDebugJson").addEventListener("click", async () => {
   try { await navigator.clipboard.writeText($("debugJson").textContent); toast("调试 JSON 已复制"); }
@@ -1407,6 +1571,8 @@ $("copyDebugJson").addEventListener("click", async () => {
 });
 document.querySelectorAll("[data-inspector-mode]").forEach((button) => button.addEventListener("click", () => setInspectorMode(button.dataset.inspectorMode)));
 $("refreshPipelineHistory").addEventListener("click", () => refreshPipelineHistory(true));
+$("debugMobilityPlugin")?.addEventListener("change", updateMobilityPluginInfo);
+loadMobilityPlugins();
 setInspectorMode("live");updateCommand();
 setView(["monitor", "capture", "debug", "storage", "tools"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "monitor");
 refresh();

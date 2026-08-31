@@ -1,0 +1,12 @@
+<launch>
+  <arg name="params_file"
+       default="$(find-pkg-share vehicle_bringup)/config/chassis_wheeltec.yaml"/>
+
+  <node pkg="turn_on_wheeltec_robot" exec="wheeltec_robot_node"
+        name="vehicle_chassis_driver" output="screen">
+    <param from="$(var params_file)"/>
+    <remap from="cmd_vel" to="/cmd_vel"/>
+    <remap from="odom" to="/odom"/>
+    <remap from="imu/data_raw" to="/imu/data_raw"/>
+  </node>
+</launch>

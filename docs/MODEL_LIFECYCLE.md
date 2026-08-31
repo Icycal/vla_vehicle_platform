@@ -32,6 +32,17 @@ Activation is available only when:
 - no Episode is recording;
 - the recent vehicle command is stationary.
 
+The web catalog reads the model `action.schema`, compares it with every Mobility Plugin `accepts`
+entry, and displays the current plugin, recommended plugin, output fields, and compatibility state.
+Plugin selection follows the model Action Schema, not the physical vehicle name. For example, an
+Ackermann vehicle trained from `cmd_vel.linear.x` and `cmd_vel.angular.z` still uses
+`chitu.mobility.twist`. `chitu.mobility.ackermann` is only valid for models whose schema is
+`chitu.action.ackermann.v1` with `speed_mps` and `steering_angle_rad` fields.
+
+An incompatible model is disabled in the browser and rejected again by the API and activation
+script. A model without an Action Descriptor is marked as unknown and remains on the safe Zero
+Adapter path.
+
 Activation updates `run/config/smolvla-runtime.env`, restarts the SmolVLA Runtime, and waits for its health check. If startup fails, the script restores the previous environment and attempts to restart the previous model. The Runtime remains Shadow-only and does not gain permission to publish final chassis commands.
 
 ## External Training Output

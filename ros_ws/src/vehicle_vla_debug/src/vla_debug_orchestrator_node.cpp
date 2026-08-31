@@ -1,9 +1,12 @@
 #include <rclcpp/rclcpp.hpp>
 #include <geometry_msgs/msg/twist.hpp>
+#include <geometry_msgs/msg/twist_stamped.hpp>
 #include <vehicle_interfaces/msg/policy_observation.hpp>
 #include <vehicle_interfaces/msg/system_state.hpp>
 #include <vehicle_interfaces/srv/capture_vla_debug.hpp>
 #include <vehicle_interfaces/srv/run_vla_debug.hpp>
+#include <vehicle_interfaces/srv/request_control_mode.hpp>
+#include <vehicle_interfaces/srv/request_safe_stop.hpp>
 #include <vehicle_policy_transport/mock_policy_transport.hpp>
 #include <vehicle_policy_transport/policy_transport.hpp>
 #include <vehicle_policy_transport/unix_socket_policy_transport.hpp>
@@ -15,9 +18,11 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <iomanip>
 #include <map>
 #include <memory>
+#include <regex>
 #include <mutex>
 #include <sstream>
 #include <stdexcept>
@@ -38,6 +43,10 @@ public:
       "socket_path", "/run/vla-policy/policy.sock");
     const auto timeout = declare_parameter<double>("transport_timeout", 35.0);
     artifact_root_ = declare_parameter<std::string>("artifact_root", "");
+    project_root_ = declare_parameter<std::string>("project_root", "");
+    if (project_root_.empty() && !artifact_root_.empty()) {
+      project_root_ = std::filesystem::path(artifact_root_).parent_path().parent_path().parent_path().string();
+    }
     if (artifact_root_.empty()) {
       throw std::invalid_argument("artifact_root must be configured");
     }
@@ -91,6 +100,12 @@ public:
     run_service_ = create_service<vehicle_interfaces::srv::RunVlaDebug>(
       "/vla/debug/run",
       std::bind(&VlaDebugOrchestrator::run, this, std::placeholders::_1, std::placeholders::_2));
+    command_publisher_ = create_publisher<geometry_msgs::msg::TwistStamped>(
+      "/vla/cmd_vel_raw", 10);
+    mode_client_ = create_client<vehicle_interfaces::srv::RequestControlMode>(
+      "/vehicle/request_mode");
+    safe_stop_client_ = create_client<vehicle_interfaces::srv::RequestSafeStop>(
+      "/vehicle/request_safe_stop");
   }
 
 private:
@@ -150,12 +165,18 @@ private:
     return input;
   }
 
-  bool safe_to_debug(std::string & reason) const
+  bool safe_to_debug(const bool allow_motion, std::string & reason) const
   {
     if (require_shadow_mode_) {
       if (!system_state_) {reason = "Vehicle system state is unavailable"; return false;}
-      if (system_state_->mode != vehicle_interfaces::msg::SystemState::MODE_VLA_SHADOW) {
-        reason = "VLA debug requires VLA_SHADOW mode";
+      const bool shadow_mode = system_state_->mode == vehicle_interfaces::msg::SystemState::MODE_VLA_SHADOW;
+      const bool assisted_mode = system_state_->mode == vehicle_interfaces::msg::SystemState::MODE_VLA_ASSISTED;
+      if (!shadow_mode && !assisted_mode) {
+        reason = "VLA debug requires VLA_SHADOW or VLA_ASSISTED mode";
+        return false;
+      }
+      if (allow_motion && !assisted_mode) {
+        reason = "Single-step execution requires VLA_ASSISTED mode";
         return false;
       }
     }
@@ -181,7 +202,7 @@ private:
     {
       std::lock_guard<std::mutex> lock(mutex_);
       std::string reason;
-      if (!safe_to_debug(reason)) {response->message = reason; return;}
+      if (!safe_to_debug(false, reason)) {response->message = reason; return;}
       if (!latest_observation_ || (now() - observation_received_at_).seconds() > observation_timeout_) {
         response->message = "A fresh PolicyObservation is required";
         return;
@@ -236,6 +257,158 @@ private:
       "Observation snapshot captured; no control command was published";
   }
 
+  Json apply_mobility_plugin(Json result, const std::string & plugin_id) const
+  {
+    const auto plugin_root = std::filesystem::path(project_root_) / "config/mobility/plugins";
+    Json manifest;
+    std::filesystem::path manifest_path;
+    if (std::filesystem::is_directory(plugin_root)) {
+      for (const auto & entry : std::filesystem::directory_iterator(plugin_root)) {
+        if (!entry.is_regular_file() || entry.path().extension() != ".json") continue;
+        try {
+          std::ifstream stream(entry.path());
+          const auto candidate = Json::parse(stream);
+          if (candidate.value("id", "") == plugin_id) {
+            manifest = candidate;
+            manifest_path = entry.path();
+            break;
+          }
+        } catch (const std::exception &) {
+        }
+      }
+    }
+    if (manifest.empty()) {
+      result["mobility_plugin"] = {{"plugin_id", plugin_id}, {"compatible", false},
+        {"message", "Mobility plugin manifest not found"}};
+      return result;
+    }
+    const auto interpreted = result.value("interpreted_output", Json::object());
+    std::string input_schema = interpreted.value("action_schema", "");
+    Json feature_names = interpreted.value("feature_names", Json::array());
+    Json actions = interpreted.value("actions", Json::array());
+    if (input_schema.empty() && interpreted.contains("twist_actions")) {
+      input_schema = "vehicle.twist_chunk.v1";
+      feature_names = {"linear_x", "angular_z"};
+      for (const auto & action : interpreted.value("twist_actions", Json::array())) {
+        actions.push_back({{"values", {action.value("linear_x", 0.0), action.value("angular_z", 0.0)}}});
+      }
+    }
+    bool compatible = false;
+    for (const auto & accepted : manifest.value("accepts", Json::array())) {
+      if (accepted.value("schema", "") == input_schema) {compatible = true; break;}
+    }
+    Json plugin_result = {
+      {"plugin_id", manifest.value("id", plugin_id)},
+      {"plugin_version", manifest.value("version", "")},
+      {"runtime_adapter", manifest.value("runtime_adapter", "")},
+      {"input_schema", input_schema},
+      {"compatible", compatible},
+      {"output_type", manifest.value("actuator", Json::object()).value("output_type", "")},
+      {"commands", Json::array()}
+    };
+    if (!compatible) {
+      plugin_result["message"] = "Selected mobility plugin does not accept this action schema";
+      result["mobility_plugin"] = plugin_result;
+      return result;
+    }
+    const auto adapter = manifest.value("runtime_adapter", "");
+    double wheelbase = 0.32;
+    std::string command_semantics = "yaw_rate";
+    if (adapter == "ackermann") {
+      try {
+        const auto relative = std::filesystem::path(manifest.value("parameters_file", ""));
+        const auto parameters_file = relative.is_absolute() ? relative : project_root_ / relative;
+        std::ifstream stream(parameters_file);
+        const std::string content((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+        std::smatch match;
+        if (std::regex_search(content, match, std::regex(R"(wheelbase_m:\s*([0-9eE+.-]+))"))) wheelbase = std::stod(match[1].str());
+        if (std::regex_search(content, match, std::regex(R"(command_semantics:\s*([A-Za-z_]+))"))) command_semantics = match[1].str();
+      } catch (const std::exception &) {
+      }
+      plugin_result["wheelbase_m"] = wheelbase;
+      plugin_result["command_semantics"] = command_semantics;
+    }
+    for (const auto & action : actions) {
+      const auto values = action.value("values", Json::array());
+      auto value_for = [&](const std::string & name) {
+        for (std::size_t index = 0; index < feature_names.size(); ++index) {
+          if (feature_names[index].get<std::string>() == name && index < values.size()) return values[index].get<double>();
+        }
+        return 0.0;
+      };
+      double linear_x = 0.0;
+      double angular_z = 0.0;
+      if (adapter == "ackermann") {
+        const double speed = value_for("speed_mps");
+        const double steering = value_for("steering_angle_rad");
+        linear_x = speed;
+        angular_z = command_semantics == "steering_angle" ? steering : (std::abs(wheelbase) > 1e-9 ? speed * std::tan(steering) / wheelbase : 0.0);
+      } else {
+        linear_x = value_for("linear_x");
+        if (linear_x == 0.0) linear_x = value_for("linear_x_mps");
+        angular_z = value_for("angular_z");
+        if (angular_z == 0.0) angular_z = value_for("angular_z_radps");
+      }
+      plugin_result["commands"].push_back({{"linear_x", linear_x}, {"angular_z", angular_z}});
+    }
+    plugin_result["message"] = "Mobility plugin conversion preview; no command was published";
+    result["mobility_plugin"] = plugin_result;
+    return result;
+  }
+  bool request_mode(const uint8_t mode, const std::string & reason)
+  {
+    if (!mode_client_->wait_for_service(500ms)) return false;
+    auto request = std::make_shared<vehicle_interfaces::srv::RequestControlMode::Request>();
+    request->requested_mode = mode;
+    request->requester = "vla_debug_orchestrator";
+    request->reason = reason;
+    auto future = mode_client_->async_send_request(request);
+    if (future.wait_for(1500ms) != std::future_status::ready) return false;
+    return future.get()->accepted;
+  }
+
+  bool request_safe_stop(const std::string & reason)
+  {
+    if (!safe_stop_client_->wait_for_service(500ms)) return false;
+    auto request = std::make_shared<vehicle_interfaces::srv::RequestSafeStop::Request>();
+    request->requester = "vla_debug_orchestrator";
+    request->reason = reason;
+    auto future = safe_stop_client_->async_send_request(request);
+    if (future.wait_for(1500ms) != std::future_status::ready) return false;
+    return future.get()->accepted;
+  }
+
+  bool execute_command(const Json & result_json, const uint32_t requested_duration_ms, Json & execution)
+  {
+    const auto plugin = result_json.value("mobility_plugin", Json::object());
+    const auto commands = plugin.value("commands", Json::array());
+    if (!plugin.value("compatible", false) || commands.empty()) {
+      execution = {{"executed", false}, {"message", "No compatible mobility command is available"}};
+      return false;
+    }
+    const auto command = commands.front();
+    geometry_msgs::msg::TwistStamped message;
+    message.header.stamp = now();
+    message.header.frame_id = "base_link";
+    message.twist.linear.x = std::clamp(command.value("linear_x", 0.0), -0.15, 0.15);
+    message.twist.angular.z = std::clamp(command.value("angular_z", 0.0), -0.5, 0.5);
+    const auto duration_ms = std::clamp<uint32_t>(requested_duration_ms == 0 ? 150 : requested_duration_ms, 50, 300);
+    if (!system_state_ || system_state_->mode != vehicle_interfaces::msg::SystemState::MODE_VLA_ASSISTED) {
+      execution = {{"executed", false}, {"message", "Enter VLA_ASSISTED single-step mode before executing"}};
+      return false;
+    }
+    command_publisher_->publish(message);
+    std::this_thread::sleep_for(std::chrono::milliseconds(duration_ms));
+    geometry_msgs::msg::TwistStamped stop;
+    stop.header.stamp = now();
+    stop.header.frame_id = "base_link";
+    command_publisher_->publish(stop);
+    execution = {{"executed", true}, {"duration_ms", duration_ms},
+      {"command", {{"linear_x", message.twist.linear.x}, {"angular_z", message.twist.angular.z}}},
+      {"control_mode", "VLA_ASSISTED"}, {"returned_to_shadow", false}};
+    return true;
+  }
+
   void run(
     const std::shared_ptr<vehicle_interfaces::srv::RunVlaDebug::Request> request,
     std::shared_ptr<vehicle_interfaces::srv::RunVlaDebug::Response> response)
@@ -243,11 +416,19 @@ private:
     const std::string stage = request->stage == "preprocess" ? "preprocess" :
       (request->stage == "inference" ? "inference" : "");
     if (stage.empty()) {response->message = "Stage must be preprocess or inference"; return;}
+    if (request->execute_command && stage != "inference") {
+      response->message = "Only the inference stage can execute a single command";
+      return;
+    }
+    if (request->execute_command && request->operator_confirmation != "I_CONFIRM_SINGLE_STEP") {
+      response->message = "Explicit single-step confirmation is required";
+      return;
+    }
     Observation snapshot;
     {
       std::lock_guard<std::mutex> lock(mutex_);
       std::string reason;
-      if (!safe_to_debug(reason)) {response->message = reason; return;}
+      if (!safe_to_debug(request->execute_command, reason)) {response->message = reason; return;}
       const auto found = snapshots_.find(request->run_id);
       if (found == snapshots_.end()) {response->message = "Debug snapshot not found"; return;}
       snapshot = found->second;
@@ -272,6 +453,35 @@ private:
         }
       }
       auto result_json = Json::parse(result.result_json);
+      std::string mobility_plugin_id = request->mobility_plugin_id;
+      if (mobility_plugin_id.empty()) {
+        const auto active_plugin_path = std::filesystem::path(project_root_) / "run/config/mobility.json";
+        try {
+          std::ifstream stream(active_plugin_path);
+          mobility_plugin_id = Json::parse(stream).value("plugin_id", "");
+        } catch (const std::exception &) {
+        }
+      }
+      if (!mobility_plugin_id.empty()) {
+        result_json = apply_mobility_plugin(result_json, mobility_plugin_id);
+      } else {
+        result_json["mobility_plugin"] = {
+          {"plugin_id", ""}, {"compatible", false},
+          {"message", "No active mobility plugin is configured"}, {"commands", Json::array()}};
+      }
+      if (request->execute_command) {
+        Json execution;
+        const bool executed = execute_command(result_json, request->execution_duration_ms, execution);
+        result_json["single_step_execution"] = execution;
+        if (!executed) {
+          response->result_json = result_json.dump();
+          response->message = execution.value("message", "Single-step command was not executed");
+          return;
+        }
+      } else {
+        result_json["single_step_execution"] = {
+          {"executed", false}, {"message", "Preview only; no vehicle command was published"}};
+      }
       const auto directory = artifact_root_ / request->run_id;
       result_json["artifacts"] = {
         {"directory", directory.string()}, {"original_image", "camera-original.jpg"},
@@ -289,13 +499,16 @@ private:
       response->accepted = true;
       response->result_json = result_json.dump();
       response->processed_image_path = processed_path;
-      response->message = stage + " completed in Shadow-only debug mode";
+      response->message = request->execute_command ?
+        stage + " completed; single-step command was sent through the safety chain" :
+        stage + " completed in preview-only mode";
     } catch (const std::exception & error) {
       response->message = error.what();
     }
   }
 
   std::filesystem::path artifact_root_;
+  std::string project_root_;
   double observation_timeout_{1.0};
   double command_timeout_{0.5};
   double stationary_linear_threshold_{0.02};
@@ -319,6 +532,9 @@ private:
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr command_subscription_;
   rclcpp::Service<vehicle_interfaces::srv::CaptureVlaDebug>::SharedPtr capture_service_;
   rclcpp::Service<vehicle_interfaces::srv::RunVlaDebug>::SharedPtr run_service_;
+  rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr command_publisher_;
+  rclcpp::Client<vehicle_interfaces::srv::RequestControlMode>::SharedPtr mode_client_;
+  rclcpp::Client<vehicle_interfaces::srv::RequestSafeStop>::SharedPtr safe_stop_client_;
 };
 
 int main(int argc, char ** argv)

@@ -1,0 +1,15 @@
+{
+  "name": "赤兔手机遥控",
+  "short_name": "赤兔遥控",
+  "description": "赤兔通用车辆平台局域网遥控与训练数据采集",
+  "lang": "zh-CN",
+  "start_url": "/teleop",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#07111d",
+  "theme_color": "#07111d",
+  "icons": [
+    {"src": "/assets/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable"}
+  ]
+}

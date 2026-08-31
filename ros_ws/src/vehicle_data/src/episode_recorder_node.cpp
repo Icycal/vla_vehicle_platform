@@ -126,6 +126,11 @@ public:
       [this](geometry_msgs::msg::TwistStamped::SharedPtr message) {
         record_header_message(*message, "/vla/cmd_vel_raw");
       });
+    mobile_command_subscription_ = create_subscription<geometry_msgs::msg::TwistStamped>(
+      "/mobile_teleop/cmd_vel", 10,
+      [this](geometry_msgs::msg::TwistStamped::SharedPtr message) {
+        record_header_message(*message, "/mobile_teleop/cmd_vel");
+      });
     selected_command_subscription_ = create_subscription<geometry_msgs::msg::TwistStamped>(
       "/control/cmd_vel_selected", 10,
       [this](geometry_msgs::msg::TwistStamped::SharedPtr message) {
@@ -245,6 +250,9 @@ private:
       start_time_ = now();
       last_image_recorded_ = rclcpp::Time(0, 0, RCL_ROS_TIME);
       last_message_ = "Recording";
+      std_msgs::msg::String task_message;
+      task_message.data = task_;
+      record_message(task_message, "/vla/task", start_time_);
       write_manifest(false, false, "Recording");
       publish_state(last_message_);
 
@@ -453,6 +461,7 @@ private:
   rclcpp::Subscription<vehicle_interfaces::msg::SafetyEvent>::SharedPtr
     safety_event_subscription_;
   rclcpp::Subscription<geometry_msgs::msg::TwistStamped>::SharedPtr vla_command_subscription_;
+  rclcpp::Subscription<geometry_msgs::msg::TwistStamped>::SharedPtr mobile_command_subscription_;
   rclcpp::Subscription<geometry_msgs::msg::TwistStamped>::SharedPtr
     selected_command_subscription_;
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr final_command_subscription_;

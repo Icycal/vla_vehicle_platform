@@ -3,10 +3,13 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include <rclcpp/rclcpp.hpp>
+#include <rclcpp_action/rclcpp_action.hpp>
 #include <geometry_msgs/msg/twist.hpp>
 #include <sensor_msgs/msg/compressed_image.hpp>
 #include <sensor_msgs/msg/image.hpp>
 #include <std_msgs/msg/string.hpp>
+#include <vehicle_interfaces/action/acquire_control_lease.hpp>
+#include <vehicle_interfaces/msg/control_lease.hpp>
 #include <vehicle_interfaces/msg/episode_state.hpp>
 #include <vehicle_interfaces/msg/observation_status.hpp>
 #include <vehicle_interfaces/msg/pipeline_trace.hpp>
@@ -14,6 +17,8 @@
 #include <vehicle_interfaces/msg/safety_event.hpp>
 #include <vehicle_interfaces/msg/shadow_metrics.hpp>
 #include <vehicle_interfaces/msg/system_state.hpp>
+#include <vehicle_interfaces/msg/teleop_command.hpp>
+#include <vehicle_interfaces/srv/release_control_lease.hpp>
 #include <vehicle_interfaces/srv/request_safe_stop.hpp>
 #include <vehicle_interfaces/srv/request_control_mode.hpp>
 #include <vehicle_interfaces/srv/start_episode.hpp>
@@ -32,6 +37,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cctype>
 #include <cerrno>
 #include <cstring>
@@ -80,6 +86,48 @@ std::string trim(const std::string & value)
   if (first == std::string::npos) {return {};}
   const auto last = value.find_last_not_of(" \t\r\n");
   return value.substr(first, last - first + 1);
+}
+nlohmann::json read_json_file(const std::filesystem::path & path)
+{
+  std::ifstream stream(path);
+  if (!stream) {throw std::runtime_error("Unable to read JSON file: " + path.string());}
+  return nlohmann::json::parse(stream);
+}
+std::vector<nlohmann::json> load_mobility_plugins(const std::filesystem::path & project_root)
+{
+  std::vector<nlohmann::json> plugins;
+  const auto root = project_root / "config/mobility/plugins";
+  if (!std::filesystem::is_directory(root)) {return plugins;}
+  for (const auto & entry : std::filesystem::directory_iterator(root)) {
+    if (!entry.is_regular_file() || entry.path().extension() != ".json") {continue;}
+    try {
+      auto plugin = read_json_file(entry.path());
+      if (plugin.value("schema_version", "") != "chitu.mobility-plugin.v1") {continue;}
+      plugin["manifest_path"] = entry.path().filename().string();
+      plugins.push_back(std::move(plugin));
+    } catch (const std::exception &) {
+    }
+  }
+  std::sort(plugins.begin(), plugins.end(), [](const auto & left, const auto & right) {
+    return left.value("id", "") < right.value("id", "");
+  });
+  return plugins;
+}
+bool mobility_plugin_accepts(const nlohmann::json & plugin, const std::string & schema)
+{
+  if (!plugin.contains("accepts") || !plugin["accepts"].is_array()) {return false;}
+  return std::any_of(plugin["accepts"].begin(), plugin["accepts"].end(), [&](const auto & item) {
+    return item.is_object() && item.value("schema", "") == schema;
+  });
+}
+std::vector<std::string> recommended_mobility_plugins(
+  const std::vector<nlohmann::json> & plugins, const std::string & schema)
+{
+  std::vector<std::string> result;
+  for (const auto & plugin : plugins) {
+    if (mobility_plugin_accepts(plugin, schema)) {result.push_back(plugin.value("id", ""));}
+  }
+  return result;
 }
 std::vector<uint8_t> decode_base64(const std::string & encoded)
 {
@@ -201,6 +249,7 @@ std::string content_type_for(const std::filesystem::path & path)
   if (extension == ".css") {return "text/css; charset=utf-8";}
   if (extension == ".js") {return "application/javascript; charset=utf-8";}
   if (extension == ".svg") {return "image/svg+xml";}
+  if (extension == ".webmanifest") {return "application/manifest+json";}
   return "application/octet-stream";
 }
 std::string mode_name(uint8_t mode)
@@ -210,6 +259,10 @@ std::string mode_name(uint8_t mode)
     case M::MODE_MANUAL: return "MANUAL";
     case M::MODE_NAV2: return "NAV2";
     case M::MODE_VLA_SHADOW: return "VLA_SHADOW";
+    case M::MODE_VLA_ASSISTED: return "VLA_ASSISTED";
+    case M::MODE_VLA_AUTONOMOUS: return "VLA_AUTONOMOUS";
+    case M::MODE_MOBILE_TELEOP: return "MOBILE_TELEOP";
+    case M::MODE_REMOTE_TELEOP: return "REMOTE_TELEOP";
     case M::MODE_SAFE_STOP: return "SAFE_STOP";
     case M::MODE_FAULT: return "FAULT";
     default: return "OTHER";
@@ -239,7 +292,18 @@ nlohmann::json component_state_json(const vehicle_interfaces::msg::ComponentStat
     {"uptime_seconds", component.uptime_seconds}, {"last_exit_code", component.last_exit_code},
     {"message", component.message}, {"dependencies", component.dependencies},
     {"expected_nodes", component.expected_nodes}, {"health_topics", component.health_topics}};
-}nlohmann::json pipeline_trace_json(const vehicle_interfaces::msg::PipelineTrace & trace)
+}
+nlohmann::json control_lease_json(const vehicle_interfaces::msg::ControlLease & lease)
+{
+  const auto expires_at_ms = static_cast<std::int64_t>(lease.expires_at.sec) * 1000LL +
+    static_cast<std::int64_t>(lease.expires_at.nanosec) / 1000000LL;
+  return {{"lease_id", lease.lease_id}, {"controller_id", lease.controller_id},
+    {"source", lease.source}, {"expires_at_ms", expires_at_ms},
+    {"max_linear_velocity", lease.max_linear_velocity},
+    {"max_angular_velocity", lease.max_angular_velocity}, {"remote", lease.remote},
+    {"active", lease.active}};
+}
+nlohmann::json pipeline_trace_json(const vehicle_interfaces::msg::PipelineTrace & trace)
 {
   nlohmann::json stages = nlohmann::json::array();
   for (const auto & stage : trace.stages) {
@@ -392,6 +456,7 @@ HostMetrics host_metrics()
 class VehicleOpsApi final : public rclcpp::Node
 {
 public:
+  using AcquireLease = vehicle_interfaces::action::AcquireControlLease;
   VehicleOpsApi();
   ~VehicleOpsApi() override;
 private:
@@ -435,11 +500,17 @@ private:
   HttpResponse dataset_download(const std::string & archive_name);
   HttpResponse dataset_review(const std::string & body);
   HttpResponse models_catalog();
+  HttpResponse mobility_plugins();
   HttpResponse task(const std::string & body);
   HttpResponse start_episode(const std::string & body);
-  HttpResponse stop_episode();
+  HttpResponse stop_episode(const std::string & body);
   HttpResponse safe_stop(const std::string & body);
   HttpResponse enter_shadow_mode();
+  HttpResponse enter_single_step_mode();
+  HttpResponse teleop_status();
+  HttpResponse teleop_acquire(const std::string & body);
+  HttpResponse teleop_command(const std::string & body);
+  HttpResponse teleop_release(const std::string & body);
   HttpResponse jobs_create(const std::string & body);
   HttpResponse jobs_list();
   HttpResponse job_get(const std::string & job_id);
@@ -468,6 +539,7 @@ private:
   Timed<vehicle_interfaces::msg::PolicyStatus> policy_;
   Timed<vehicle_interfaces::msg::ShadowMetrics> shadow_;
   Timed<vehicle_interfaces::msg::SafetyEvent> safety_;
+  Timed<vehicle_interfaces::msg::ControlLease> control_lease_;
   std::optional<vehicle_interfaces::msg::PipelineTrace> pipeline_trace_;
   std::deque<vehicle_interfaces::msg::PipelineTrace> pipeline_history_;
   std::chrono::steady_clock::time_point pipeline_received_{};
@@ -510,11 +582,15 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr raw_camera_sub_;
   rclcpp::Subscription<sensor_msgs::msg::CompressedImage>::SharedPtr camera_sub_;
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr command_sub_;
+  rclcpp::Subscription<vehicle_interfaces::msg::ControlLease>::SharedPtr control_lease_sub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr task_pub_;
+  rclcpp::Publisher<vehicle_interfaces::msg::TeleopCommand>::SharedPtr teleop_command_pub_;
   rclcpp::Client<vehicle_interfaces::srv::StartEpisode>::SharedPtr start_client_;
   rclcpp::Client<vehicle_interfaces::srv::StopEpisode>::SharedPtr stop_client_;
   rclcpp::Client<vehicle_interfaces::srv::RequestSafeStop>::SharedPtr safe_client_;
   rclcpp::Client<vehicle_interfaces::srv::RequestControlMode>::SharedPtr mode_client_;
+  rclcpp_action::Client<AcquireLease>::SharedPtr acquire_lease_client_;
+  rclcpp::Client<vehicle_interfaces::srv::ReleaseControlLease>::SharedPtr release_lease_client_;
   rclcpp::Client<vehicle_interfaces::srv::CaptureVlaDebug>::SharedPtr debug_capture_client_;
   rclcpp::Client<vehicle_interfaces::srv::RunVlaDebug>::SharedPtr debug_run_client_;
   rclcpp::Client<vehicle_interfaces::srv::ListComponents>::SharedPtr components_client_;
@@ -616,13 +692,24 @@ VehicleOpsApi::VehicleOpsApi() : Node("vehicle_ops_api")
       latest_command_ = *message;
       command_received_ = std::chrono::steady_clock::now();
     });
+  control_lease_sub_ = create_subscription<vehicle_interfaces::msg::ControlLease>(
+    "/vehicle/control_lease", state_qos,
+    [this](vehicle_interfaces::msg::ControlLease::SharedPtr message) {
+      update(control_lease_, *message);
+    });
   task_pub_ = create_publisher<std_msgs::msg::String>(
     "/vla/task", rclcpp::QoS(1).reliable().transient_local());
+  teleop_command_pub_ = create_publisher<vehicle_interfaces::msg::TeleopCommand>(
+    "/vehicle/teleop_command", 20);
   active_debug_timer_ = create_wall_timer(500ms, std::bind(&VehicleOpsApi::active_debug_tick, this));
   start_client_ = create_client<vehicle_interfaces::srv::StartEpisode>("/vehicle/start_episode");
   stop_client_ = create_client<vehicle_interfaces::srv::StopEpisode>("/vehicle/stop_episode");
   safe_client_ = create_client<vehicle_interfaces::srv::RequestSafeStop>("/vehicle/request_safe_stop");
   mode_client_ = create_client<vehicle_interfaces::srv::RequestControlMode>("/vehicle/request_mode");
+  acquire_lease_client_ = rclcpp_action::create_client<AcquireLease>(
+    this, "/vehicle/acquire_control_lease");
+  release_lease_client_ = create_client<vehicle_interfaces::srv::ReleaseControlLease>(
+    "/vehicle/release_control_lease");
   debug_capture_client_ = create_client<vehicle_interfaces::srv::CaptureVlaDebug>("/vla/debug/capture");
   debug_run_client_ = create_client<vehicle_interfaces::srv::RunVlaDebug>("/vla/debug/run");
   components_client_ = create_client<vehicle_interfaces::srv::ListComponents>("/vehicle/operations/list_components");
@@ -683,9 +770,35 @@ HttpRequest VehicleOpsApi::read_request(int client) const
   std::string data;
   char buffer[4096];
   std::size_t header_end = std::string::npos;
-  while ((header_end = data.find("\r\n\r\n")) == std::string::npos) {
-    const auto count = ::recv(client, buffer, sizeof(buffer), 0);
-    if (count <= 0) {throw std::runtime_error("Incomplete request");}
+  std::size_t delimiter_size = 0;
+  const auto find_header_end = [&data, &delimiter_size]() {
+      const auto strict_end = data.find("\r\n\r\n");
+      if (strict_end != std::string::npos) {
+        delimiter_size = 4;
+        return strict_end;
+      }
+      const auto tolerant_end = data.find("\n\n");
+      if (tolerant_end != std::string::npos) {
+        delimiter_size = 2;
+        return tolerant_end;
+      }
+      return std::string::npos;
+    };
+  const auto receive = [client, &buffer]() {
+      while (true) {
+        const auto count = ::recv(client, buffer, sizeof(buffer), 0);
+        if (count >= 0) {return count;}
+        if (errno == EINTR) {continue;}
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+          throw std::runtime_error("Request receive timed out");
+        }
+        throw std::runtime_error(
+          std::string("Request receive failed: ") + std::strerror(errno));
+      }
+    };
+  while ((header_end = find_header_end()) == std::string::npos) {
+    const auto count = receive();
+    if (count == 0) {throw std::runtime_error("Incomplete request");}
     data.append(buffer, static_cast<std::size_t>(count));
     if (data.size() > static_cast<std::size_t>(limit_)) {throw std::length_error("Request too large");}
   }
@@ -695,7 +808,9 @@ HttpRequest VehicleOpsApi::read_request(int client) const
   std::getline(headers, line);
   std::istringstream first(trim(line));
   first >> request.method >> request.target >> version;
-  if (version.rfind("HTTP/", 0) != 0) {throw std::runtime_error("Invalid request line");}
+  if (request.method.empty() || request.target.empty() || version.rfind("HTTP/", 0) != 0) {
+    throw std::runtime_error("Invalid request line");
+  }
   while (std::getline(headers, line)) {
     const auto separator = line.find(':');
     if (separator != std::string::npos) {
@@ -706,11 +821,12 @@ HttpRequest VehicleOpsApi::read_request(int client) const
   const auto found = request.headers.find("content-length");
   if (found != request.headers.end()) {length = static_cast<std::size_t>(std::stoul(found->second));}
   if (length > static_cast<std::size_t>(limit_)) {throw std::length_error("Body too large");}
-  const auto body_offset = header_end + 4;
+  const auto body_offset = header_end + delimiter_size;
   while (data.size() - body_offset < length) {
-    const auto count = ::recv(client, buffer, sizeof(buffer), 0);
-    if (count <= 0) {throw std::runtime_error("Incomplete body");}
+    const auto count = receive();
+    if (count == 0) {throw std::runtime_error("Incomplete body");}
     data.append(buffer, static_cast<std::size_t>(count));
+    if (data.size() > static_cast<std::size_t>(limit_)) {throw std::length_error("Request too large");}
   }
   request.body = data.substr(body_offset, length);
   return request;
@@ -747,6 +863,21 @@ HttpResponse VehicleOpsApi::route(const HttpRequest & request)
   }
   if (request.method == "GET" && path == "/api/camera/front.jpg") {return camera();}
   if (request.method == "GET" && path == "/api/pipeline/live") {return pipeline_live();}
+  if (request.method == "GET" && path == "/api/teleop/status") {return teleop_status();}
+  if (path.rfind("/api/teleop/", 0) == 0) {
+    const auto denied = authorize(request);
+    if (denied) {return *denied;}
+    if (request.method == "POST" && path == "/api/teleop/acquire") {
+      return teleop_acquire(request.body);
+    }
+    if (request.method == "POST" && path == "/api/teleop/command") {
+      return teleop_command(request.body);
+    }
+    if (request.method == "POST" && path == "/api/teleop/release") {
+      return teleop_release(request.body);
+    }
+    return error(405, "Unsupported teleop endpoint");
+  }
   if (request.method == "GET" && path == "/api/pipeline/history") {return pipeline_history();}
   if (request.method == "GET" && path == "/api/active-debug/session") {return active_debug_get();}
   if (request.method == "POST" && path == "/api/active-debug/sessions") {
@@ -772,6 +903,7 @@ HttpResponse VehicleOpsApi::route(const HttpRequest & request)
     return dataset_review(request.body);
   }
   if (request.method == "GET" && path == "/api/models") {return models_catalog();}
+  if (request.method == "GET" && path == "/api/mobility/plugins") {return mobility_plugins();}
   if (request.method == "GET" && path.rfind("/api/storage/items/", 0) == 0) {
     const auto denied = authorize(request);
     if (denied) {return *denied;}
@@ -792,6 +924,9 @@ HttpResponse VehicleOpsApi::route(const HttpRequest & request)
     if (denied) {return *denied;}
     if (request.method == "POST" && path == "/api/vla-debug/enter-shadow") {
       return enter_shadow_mode();
+    }
+    if (request.method == "POST" && path == "/api/vla-debug/enter-single-step") {
+      return enter_single_step_mode();
     }
     if (request.method == "POST" && path == "/api/vla-debug/capture") {
       return debug_capture(request.body);
@@ -829,7 +964,7 @@ HttpResponse VehicleOpsApi::route(const HttpRequest & request)
     if (denied) {return *denied;}
     if (path == "/api/task") {return task(request.body);}
     if (path == "/api/episode/start") {return start_episode(request.body);}
-    if (path == "/api/episode/stop") {return stop_episode();}
+    if (path == "/api/episode/stop") {return stop_episode(request.body);}
     if (path == "/api/safe-stop") {return safe_stop(request.body);}
     if (path == "/api/storage/cleanup") {return storage_cleanup(request.body);}
   }
@@ -849,7 +984,10 @@ HttpResponse VehicleOpsApi::static_file(const std::string & path) const
 {
   std::filesystem::path relative;
   if (path == "/" || path == "/index.html") {relative = "index.html";}
+  else if (path == "/teleop" || path == "/teleop.html") {relative = "teleop.html";}
   else if (path == "/favicon.svg") {relative = "favicon.svg";}
+  else if (path == "/manifest.webmanifest") {relative = "manifest.webmanifest";}
+  else if (path == "/teleop-sw.js") {relative = "teleop-sw.js";}
   else if (path.rfind("/assets/", 0) == 0 && path.size() <= 180 &&
     path.find("..") == std::string::npos && path.find('\\') == std::string::npos)
   {
@@ -861,7 +999,11 @@ HttpResponse VehicleOpsApi::static_file(const std::string & path) const
   } else {return error(404, "Resource not found");}
   try {
     const auto file = std::filesystem::path(web_root_) / relative;
-    return {200, content_type_for(file), read_file(file), {{"Cache-Control", "no-cache"}}};
+    HttpResponse response{200, content_type_for(file), read_file(file), {{"Cache-Control", "no-cache"}}};
+    if (path == "/teleop-sw.js") {
+      response.headers.emplace_back("Service-Worker-Allowed", "/");
+    }
+    return response;
   } catch (const std::exception &) {return error(404, "Resource not found");}
 }
 HttpResponse VehicleOpsApi::camera()
@@ -1229,13 +1371,29 @@ HttpResponse VehicleOpsApi::dataset_review(const std::string & body)
   return {200, "application/json; charset=utf-8", review.dump() + "\n", {{"Cache-Control", "no-store"}}};
 }
 
+HttpResponse VehicleOpsApi::mobility_plugins()
+{
+  const nlohmann::json result = load_mobility_plugins(std::filesystem::path(project_root_));
+  return {200, "application/json; charset=utf-8", result.dump(), {{"Cache-Control", "no-store"}}};
+}
 HttpResponse VehicleOpsApi::models_catalog()
 {
   namespace fs = std::filesystem;
+  const auto project_root = fs::path(project_root_);
+  const auto mobility_plugins = load_mobility_plugins(project_root);
+  nlohmann::json active_mobility = nlohmann::json::object();
+  const auto active_mobility_path = project_root / "run/config/mobility.json";
+  if (fs::is_regular_file(active_mobility_path)) {
+    try {active_mobility = read_json_file(active_mobility_path);}
+    catch (const std::exception &) {active_mobility["manifest_error"] = true;}
+  }
+  const std::string active_plugin_id = active_mobility.value("plugin_id", "");
   nlohmann::json result{{"schema_version", "vehicle.ops.model-catalog.v1"},
     {"providers", nlohmann::json::array({{{"provider_id", "smolvla"},
       {"display_name", "SmolVLA"}, {"install_supported", true}, {"activate_supported", true}}})},
-    {"models", nlohmann::json::array()}};
+    {"models", nlohmann::json::array()},
+    {"mobility", {{"active_plugin_id", active_plugin_id}, {"active", active_mobility},
+      {"plugins", mobility_plugins}}}};
   fs::path active_root;
   std::string active_model_id;
   std::ifstream environment(fs::path(project_root_) / "run/config/smolvla-runtime.env");
@@ -1257,11 +1415,53 @@ HttpResponse VehicleOpsApi::models_catalog()
         fs::exists(model_path / "policy_preprocessor.json") && fs::exists(model_path / "policy_postprocessor.json")}};
     std::error_code model_error;
     item["active"] = fs::weakly_canonical(model_path, model_error) == active_root;
+    nlohmann::json compatibility{{"status", "missing_action_descriptor"},
+      {"action_schema", ""}, {"recommended_plugin_ids", nlohmann::json::array()},
+      {"active_plugin_id", active_plugin_id}, {"active_plugin_compatible", true},
+      {"activation_allowed", true}, {"uses_zero_adapter", true}};
     const auto manifest_path = model_path / "vehicle_model_manifest.json";
     if (fs::exists(manifest_path)) {
-      try {item["manifest"] = nlohmann::json::parse(std::ifstream(manifest_path));}
-      catch (...) {item["manifest_error"] = true;}
+      try {
+        item["manifest"] = read_json_file(manifest_path);
+        const auto & manifest = item["manifest"];
+        if (manifest.contains("action") && !manifest["action"].is_null() &&
+          !manifest["action"].is_object())
+        {
+          compatibility["status"] = "invalid_action_descriptor";
+          compatibility["active_plugin_compatible"] = false;
+          compatibility["activation_allowed"] = false;
+        } else if (manifest.contains("action") && manifest["action"].is_object()) {
+          const std::string action_schema = manifest["action"].value("schema", "");
+          compatibility["action_schema"] = action_schema;
+          compatibility["uses_zero_adapter"] = false;
+          if (action_schema.empty()) {
+            compatibility["status"] = "invalid_action_descriptor";
+            compatibility["active_plugin_compatible"] = false;
+            compatibility["activation_allowed"] = false;
+          } else {
+            const auto recommended = recommended_mobility_plugins(mobility_plugins, action_schema);
+            compatibility["recommended_plugin_ids"] = recommended;
+            const bool active_compatible = !active_plugin_id.empty() &&
+              mobility_plugin_accepts(active_mobility, action_schema);
+            compatibility["active_plugin_compatible"] = active_compatible;
+            compatibility["activation_allowed"] = active_compatible;
+            if (recommended.empty()) {
+              compatibility["status"] = "unsupported_schema";
+            } else if (active_plugin_id.empty()) {
+              compatibility["status"] = "no_active_plugin";
+            } else {
+              compatibility["status"] = active_compatible ? "compatible" : "incompatible";
+            }
+          }
+        }
+      } catch (const std::exception &) {
+        item["manifest_error"] = true;
+        compatibility["status"] = "manifest_error";
+        compatibility["active_plugin_compatible"] = false;
+        compatibility["activation_allowed"] = false;
+      }
     }
+    item["compatibility"] = std::move(compatibility);
     result["models"].push_back(item);
   };
   append_model(fs::path(project_root_) / "run/models/smolvla_base", "smolvla", "legacy-base", false);
@@ -1350,6 +1550,156 @@ HttpResponse VehicleOpsApi::storage_cleanup(const std::string & body)
     {{"Cache-Control", "no-store"}}};
 }
 
+HttpResponse VehicleOpsApi::teleop_status()
+{
+  nlohmann::json response;
+  const auto server_time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+    std::chrono::system_clock::now().time_since_epoch()).count();
+  std::lock_guard<std::mutex> lock(mutex_);
+  response["server_time_ms"] = server_time_ms;
+  response["lease_received"] = control_lease_.message.has_value();
+  response["lease"] = control_lease_.message ?
+    control_lease_json(*control_lease_.message) : nlohmann::json::object();
+  response["system"] = nlohmann::json::object();
+  if (system_.message) {
+    response["system"] = {{"mode", system_.message->mode},
+      {"mode_name", mode_name(system_.message->mode)},
+      {"control_source", system_.message->control_source},
+      {"safe_to_move", system_.message->safe_to_move},
+      {"message", system_.message->status_message}};
+  }
+  response["episode"] = nlohmann::json::object();
+  if (episode_.message) {
+    response["episode"] = {{"state", episode_.message->state},
+      {"state_name", episode_name(episode_.message->state)},
+      {"episode_id", episode_.message->episode_id}, {"task", episode_.message->task},
+      {"elapsed_seconds", episode_.message->elapsed_seconds},
+      {"image_count", episode_.message->image_count},
+      {"message_count", episode_.message->message_count}};
+  }
+  response["executed_command"] = {{"linear_x", latest_command_.linear.x},
+    {"angular_z", latest_command_.angular.z}};
+  return {200, "application/json; charset=utf-8", response.dump(),
+    {{"Cache-Control", "no-store"}}};
+}
+
+HttpResponse VehicleOpsApi::teleop_acquire(const std::string & body)
+{
+  nlohmann::json input;
+  try {input = nlohmann::json::parse(body);}
+  catch (const nlohmann::json::exception &) {return error(400, "Request body must be valid JSON");}
+  const std::string controller_id = input.value("controller_id", "");
+  const bool valid_controller = !controller_id.empty() && controller_id.size() <= 64 &&
+    std::all_of(controller_id.begin(), controller_id.end(), [](unsigned char value) {
+      return std::isalnum(value) || value == '-' || value == '_';
+    });
+  if (!valid_controller) {return error(400, "Invalid controller_id");}
+  if (!acquire_lease_client_->wait_for_action_server(
+      std::chrono::duration<double>(service_seconds_)))
+  {
+    return error(503, "Teleop lease manager is unavailable");
+  }
+  AcquireLease::Goal goal;
+  goal.controller_id = controller_id;
+  goal.source = "mobile";
+  const int duration_seconds = std::clamp(input.value("duration_seconds", 30), 3, 30);
+  goal.requested_duration.sec = duration_seconds;
+  goal.requested_duration.nanosec = 0;
+  goal.requested_max_linear_velocity = std::clamp(
+    input.value("max_linear_velocity", 0.25F), 0.02F, 0.4F);
+  goal.requested_max_angular_velocity = std::clamp(
+    input.value("max_angular_velocity", 0.5F), 0.05F, 0.8F);
+  goal.remote = false;
+  auto goal_future = acquire_lease_client_->async_send_goal(goal);
+  if (goal_future.wait_for(std::chrono::duration<double>(service_seconds_)) !=
+    std::future_status::ready)
+  {
+    return error(408, "Teleop lease request timed out");
+  }
+  const auto goal_handle = goal_future.get();
+  if (!goal_handle) {return error(409, "Another controller owns the active teleop lease");}
+  auto result_future = acquire_lease_client_->async_get_result(goal_handle);
+  if (result_future.wait_for(std::chrono::duration<double>(service_seconds_ + 1.0)) !=
+    std::future_status::ready)
+  {
+    return error(408, "Teleop lease result timed out");
+  }
+  const auto wrapped = result_future.get();
+  if (wrapped.code != rclcpp_action::ResultCode::SUCCEEDED || !wrapped.result ||
+    !wrapped.result->granted)
+  {
+    return error(409, wrapped.result ? wrapped.result->message : "Teleop lease was rejected");
+  }
+  return success(wrapped.result->message,
+    "\"lease\":" + control_lease_json(wrapped.result->lease).dump());
+}
+
+HttpResponse VehicleOpsApi::teleop_command(const std::string & body)
+{
+  nlohmann::json input;
+  try {input = nlohmann::json::parse(body);}
+  catch (const nlohmann::json::exception &) {return error(400, "Request body must be valid JSON");}
+  const std::string lease_id = input.value("lease_id", "");
+  const std::string controller_id = input.value("controller_id", "");
+  const std::uint64_t sequence = input.value("sequence", std::uint64_t{0});
+  const bool deadman = input.value("deadman", false);
+  const double linear = input.value("linear", 0.0);
+  const double angular = input.value("angular", 0.0);
+  const int valid_for_ms = std::clamp(input.value("valid_for_ms", 250), 50, 300);
+  if (lease_id.empty() || controller_id.empty() || sequence == 0 ||
+    !std::isfinite(linear) || !std::isfinite(angular) ||
+    std::abs(linear) > 1.0 || std::abs(angular) > 1.0)
+  {
+    return error(400, "Invalid teleop command");
+  }
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!control_lease_.message || !control_lease_.message->active ||
+      control_lease_.message->lease_id != lease_id ||
+      control_lease_.message->controller_id != controller_id)
+    {
+      return error(409, "Teleop lease is not active for this controller");
+    }
+  }
+  vehicle_interfaces::msg::TeleopCommand command;
+  command.header.stamp = now();
+  command.header.frame_id = "base_link";
+  command.lease_id = lease_id;
+  command.controller_id = controller_id;
+  command.sequence = sequence;
+  command.valid_for.sec = valid_for_ms / 1000;
+  command.valid_for.nanosec = static_cast<std::uint32_t>(valid_for_ms % 1000) * 1000000U;
+  command.deadman = deadman;
+  command.linear_normalized = static_cast<float>(linear);
+  command.angular_normalized = static_cast<float>(angular);
+  teleop_command_pub_->publish(command);
+  return success(deadman ? "Teleop command accepted" : "Teleop zero command accepted");
+}
+
+HttpResponse VehicleOpsApi::teleop_release(const std::string & body)
+{
+  nlohmann::json input;
+  try {input = nlohmann::json::parse(body);}
+  catch (const nlohmann::json::exception &) {return error(400, "Request body must be valid JSON");}
+  const std::string lease_id = input.value("lease_id", "");
+  const std::string controller_id = input.value("controller_id", "");
+  if (lease_id.empty() || controller_id.empty()) {return error(400, "Lease identity is required");}
+  if (!release_lease_client_->wait_for_service(std::chrono::duration<double>(service_seconds_))) {
+    return error(503, "Teleop lease manager is unavailable");
+  }
+  auto request = std::make_shared<vehicle_interfaces::srv::ReleaseControlLease::Request>();
+  request->lease_id = lease_id;
+  request->controller_id = controller_id;
+  auto future = release_lease_client_->async_send_request(request);
+  if (future.wait_for(std::chrono::duration<double>(service_seconds_)) !=
+    std::future_status::ready)
+  {
+    return error(408, "Teleop release timed out");
+  }
+  const auto response = future.get();
+  if (!response->released) {return error(409, response->message);}
+  return success(response->message);
+}
 HttpResponse VehicleOpsApi::task(const std::string & body)
 {
   const auto value = trim(body);
@@ -1377,11 +1727,21 @@ HttpResponse VehicleOpsApi::start_episode(const std::string & body)
     ",\"directory\":" + json_string(response->directory);
   return success(response->message, extra);
 }
-HttpResponse VehicleOpsApi::stop_episode()
+HttpResponse VehicleOpsApi::stop_episode(const std::string & body)
 {
   if (!stop_client_->wait_for_service(250ms)) {return error(503, "Episode Recorder is unavailable");}
-  auto future = stop_client_->async_send_request(
-    std::make_shared<vehicle_interfaces::srv::StopEpisode::Request>());
+  auto request = std::make_shared<vehicle_interfaces::srv::StopEpisode::Request>();
+  request->success = true;
+  request->reason = "Episode completed from Vehicle Ops";
+  if (!trim(body).empty()) {
+    const auto input = nlohmann::json::parse(body, nullptr, false);
+    if (input.is_discarded() || !input.is_object()) {
+      return error(400, "Episode stop body must be valid JSON");
+    }
+    request->success = input.value("success", true);
+    request->reason = input.value("reason", request->reason);
+  }
+  auto future = stop_client_->async_send_request(request);
   if (future.wait_for(std::chrono::milliseconds(static_cast<int>(service_seconds_ * 1000))) != std::future_status::ready) {
     return error(408, "Episode stop timed out");
   }
@@ -1425,6 +1785,28 @@ HttpResponse VehicleOpsApi::enter_shadow_mode()
     "\"mode\":\"VLA_SHADOW\",\"current_mode\":" +
     std::to_string(response->current_mode));
 }
+HttpResponse VehicleOpsApi::enter_single_step_mode()
+{
+  if (!mode_client_->wait_for_service(250ms)) {
+    return error(503, "Vehicle Supervisor is unavailable");
+  }
+  auto request = std::make_shared<vehicle_interfaces::srv::RequestControlMode::Request>();
+  request->requested_mode = vehicle_interfaces::msg::SystemState::MODE_VLA_ASSISTED;
+  request->requester = "vehicle_ops_console";
+  request->reason = "Operator entered VLA single-step control mode";
+  auto future = mode_client_->async_send_request(request);
+  if (future.wait_for(std::chrono::milliseconds(static_cast<int>(service_seconds_ * 1000))) !=
+    std::future_status::ready)
+  {
+    return error(408, "Control mode request timed out");
+  }
+  const auto response = future.get();
+  if (!response->accepted) {return error(409, response->message);}
+  return success(response->message,
+    "\"mode\":\"VLA_ASSISTED\",\"current_mode\":" +
+    std::to_string(response->current_mode));
+}
+
 HttpResponse VehicleOpsApi::debug_capture(const std::string & body)
 {
   if (!debug_capture_client_->wait_for_service(250ms)) {
@@ -1489,6 +1871,10 @@ HttpResponse VehicleOpsApi::debug_run(const std::string & body)
   auto request = std::make_shared<vehicle_interfaces::srv::RunVlaDebug::Request>();
   request->run_id = input.at("run_id").get<std::string>();
   request->stage = input.at("stage").get<std::string>();
+  request->mobility_plugin_id = input.value("mobility_plugin_id", "");
+  request->execute_command = input.value("execute_command", false);
+  request->operator_confirmation = input.value("operator_confirmation", "");
+  request->execution_duration_ms = input.value("execution_duration_ms", 150U);
   auto future = debug_run_client_->async_send_request(request);
   if (future.wait_for(std::chrono::milliseconds(static_cast<int>(debug_timeout_seconds_ * 1000))) !=
     std::future_status::ready)
@@ -1544,6 +1930,51 @@ HttpResponse VehicleOpsApi::jobs_create(const std::string & body)
         std::abs(latest_command_.angular.z) > stationary_angular_threshold_))
       {
         return error(409, "Vehicle command is not stationary");
+      }
+    }
+    if (job_type == "policy.model_activate") {
+      const auto parameters = input.value("parameters", nlohmann::json::object());
+      const std::string provider = parameters.value("provider", "");
+      const std::string version = parameters.value("version", "");
+      if (provider != "smolvla" || version.empty() ||
+        version.find_first_of("/\\") != std::string::npos)
+      {
+        return error(400, "Invalid model activation request");
+      }
+      const auto project_root = std::filesystem::path(project_root_);
+      const auto model_manifest_path = project_root / "run/models/providers/smolvla" / version /
+        "vehicle_model_manifest.json";
+      if (std::filesystem::is_regular_file(model_manifest_path)) {
+        nlohmann::json manifest;
+        try {manifest = read_json_file(model_manifest_path);}
+        catch (const std::exception &) {return error(409, "Model manifest is invalid");}
+        if (manifest.contains("action") && !manifest["action"].is_null() &&
+          !manifest["action"].is_object())
+        {
+          return error(409, "Model action descriptor must be an object");
+        }
+        if (manifest.contains("action") && manifest["action"].is_object()) {
+          const std::string action_schema = manifest["action"].value("schema", "");
+          if (action_schema.empty()) {return error(409, "Model action descriptor has no schema");}
+          const auto mobility_path = project_root / "run/config/mobility.json";
+          if (!std::filesystem::is_regular_file(mobility_path)) {
+            return error(409, "Activate a compatible mobility plugin before activating this model");
+          }
+          nlohmann::json active_mobility;
+          try {active_mobility = read_json_file(mobility_path);}
+          catch (const std::exception &) {return error(409, "Active mobility plugin metadata is invalid");}
+          if (!mobility_plugin_accepts(active_mobility, action_schema)) {
+            const auto recommended = recommended_mobility_plugins(
+              load_mobility_plugins(project_root), action_schema);
+            std::ostringstream message;
+            message << "Model action schema " << action_schema << " is incompatible with " <<
+              active_mobility.value("plugin_id", "the active mobility plugin");
+            if (!recommended.empty()) {
+              message << "; recommended plugin: " << recommended.front();
+            }
+            return error(409, message.str());
+          }
+        }
       }
     }
     return {202, "application/json; charset=utf-8", jobs_->create(body), {{"Cache-Control", "no-store"}}};

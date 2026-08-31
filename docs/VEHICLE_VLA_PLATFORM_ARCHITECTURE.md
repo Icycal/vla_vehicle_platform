@@ -90,7 +90,7 @@ PolicyObservation  →  Policy Provider  →  PolicyAction
 
 - 导航候选：`/nav/cmd_vel`；
 - VLA 候选：`/vla/cmd_vel_raw`；
-- 手机候选：`/mobile/cmd_vel`；
+- 手机候选：`/mobile_teleop/cmd_vel`；
 - 云端候选：建议进入 `/cloud/cmd_vel`，并经过远程控制会话授权。
 
 最终 `/cmd_vel` 只能由 `vla_safety_guard` 发布。平台不会修改原有 `wheeltec_ros2` 或 `rhzd_assist`，底盘最终消费链路仍由现有工程负责。
@@ -366,7 +366,7 @@ Replay Provider
 ```text
 /nav/cmd_vel
 /vla/cmd_vel_raw
-/mobile/cmd_vel
+/mobile_teleop/cmd_vel
 /cloud/cmd_vel
 ```
 
@@ -623,7 +623,7 @@ sequenceDiagram
 flowchart LR
   NAV[Navigation] --> NAVCMD[/nav/cmd_vel]
   VLA[VLA Action Runtime] --> VLACMD[/vla/cmd_vel_raw]
-  APP[手机 App] --> APPCMD[/mobile/cmd_vel]
+  APP[手机 App] --> APPCMD[/mobile_teleop/cmd_vel]
   CLOUD[云端控制] --> CLOUDCMD[/cloud/cmd_vel]
   NAVCMD --> MUX[Control Mux]
   VLACMD --> MUX

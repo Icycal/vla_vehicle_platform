@@ -11,9 +11,27 @@ MOBILITY_PARAMS_FILE="${VLA_MOBILITY_PARAMS_FILE:-${PROJECT_ROOT}/run/config/mob
 if [[ ! -f "${MOBILITY_PARAMS_FILE}" ]]; then
   MOBILITY_PARAMS_FILE="${PROJECT_ROOT}/ros_ws/install/vehicle_bringup/share/vehicle_bringup/config/mobility_twist.yaml"
 fi
+
+load_chassis_config() {
+  local config_file="${VLA_CHASSIS_ENV_FILE:-${VLA_RUNTIME_ROOT}/config/chassis.env}"
+  if [[ -f "${config_file}" ]]; then
+    set -a
+    source "${config_file}"
+    set +a
+  fi
+  VLA_CHASSIS_PROVIDER="${VLA_CHASSIS_PROVIDER:-wheeltec}"
+  VLA_CHASSIS_LAUNCH_PACKAGE="${VLA_CHASSIS_LAUNCH_PACKAGE:-vehicle_bringup}"
+  VLA_CHASSIS_LAUNCH_FILE="${VLA_CHASSIS_LAUNCH_FILE:-vehicle_chassis_wheeltec.launch.xml}"
+  VLA_CHASSIS_LAUNCH_ARGUMENTS="${VLA_CHASSIS_LAUNCH_ARGUMENTS:-}"
+}
 case "${1:-}" in
   front_camera)
     exec ros2 launch vehicle_bringup front_camera.launch.xml
+    ;;
+  vehicle_chassis)
+    load_chassis_config
+    read -r -a chassis_launch_arguments <<< "${VLA_CHASSIS_LAUNCH_ARGUMENTS}"
+    exec ros2 launch "${VLA_CHASSIS_LAUNCH_PACKAGE}" "${VLA_CHASSIS_LAUNCH_FILE}" "${chassis_launch_arguments[@]}"
     ;;
   runtime_core)
     exec ros2 launch vehicle_bringup phase0.launch.xml \

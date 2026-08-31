@@ -31,6 +31,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   srv/ControlComponent.srv
   srv/ControlProfile.srv
   srv/ReadComponentLog.srv
+  srv/ReleaseControlLease.srv
   srv/ListComponents.srv
   srv/CaptureVlaDebug.srv
   srv/RunVlaDebug.srv

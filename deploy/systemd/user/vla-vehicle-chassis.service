@@ -1,0 +1,22 @@
+[Unit]
+Description=VLA Vehicle Chassis Driver
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=@VLA_PROJECT_ROOT@
+Environment=ROS_DOMAIN_ID=43
+Environment=VLA_STATE_ROOT=@VLA_STATE_ROOT@
+Environment=VLA_RUNTIME_ROOT=@VLA_RUNTIME_ROOT@
+Environment=VLA_LOG_ROOT=@VLA_LOG_ROOT@
+ExecStart=@VLA_PROJECT_ROOT@/scripts/run_managed_component.sh vehicle_chassis
+ExecStop=@VLA_PROJECT_ROOT@/scripts/stop_managed_component.sh vehicle_chassis
+StandardOutput=append:@VLA_LOG_ROOT@/components/vehicle_chassis.log
+StandardError=append:@VLA_LOG_ROOT@/components/vehicle_chassis.log
+Restart=on-failure
+RestartSec=2
+KillMode=mixed
+TimeoutStopSec=15
+
+[Install]
+WantedBy=default.target

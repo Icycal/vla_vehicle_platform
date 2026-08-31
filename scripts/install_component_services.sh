@@ -5,6 +5,11 @@ source "${PROJECT_ROOT}/scripts/lib/runtime_paths.sh"
 UNIT_ROOT="${HOME}/.config/systemd/user"
 prepare_vla_runtime_paths
 mkdir -p "${UNIT_ROOT}"
+mkdir -p "${VLA_RUNTIME_ROOT}/config"
+
+if [[ ! -f "${VLA_RUNTIME_ROOT}/config/chassis.env" ]]; then
+  cp "${PROJECT_ROOT}/config/chassis.env.example" "${VLA_RUNTIME_ROOT}/config/chassis.env"
+fi
 
 escape_sed_replacement() {
   printf '%s' "$1" | sed 's/[\\&|]/\\&/g'
@@ -25,7 +30,7 @@ for template in "${PROJECT_ROOT}"/deploy/systemd/user/*.service; do
     "${template}" > "${unit_path}"
   chmod 0644 "${unit_path}"
 done
-chmod +x "${PROJECT_ROOT}/scripts/run_managed_component.sh"
+chmod +x "${PROJECT_ROOT}/scripts/run_managed_component.sh" "${PROJECT_ROOT}/scripts/stop_managed_component.sh"
 systemctl --user daemon-reload
 systemctl --user enable vla-ops-console.service
 printf 'Installed component services into %s\n' "${UNIT_ROOT}"

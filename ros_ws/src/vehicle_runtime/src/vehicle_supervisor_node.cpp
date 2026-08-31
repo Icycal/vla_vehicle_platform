@@ -106,14 +106,11 @@ void VehicleSupervisor::on_mode_request(
     response->message = "Safety stop is active";
     return;
   }
-  if (is_vla_mode(request->requested_mode) && !policy_ready_) {
-    response->message = "Policy is not ready";
-    return;
-  }
-  if (request->requested_mode == vehicle_interfaces::msg::SystemState::MODE_MOBILE_TELEOP ||
-    request->requested_mode == vehicle_interfaces::msg::SystemState::MODE_REMOTE_TELEOP)
-  {
-    response->message = "Control lease manager is not active in phase 0";
+  const bool requires_policy =
+    request->requested_mode == vehicle_interfaces::msg::SystemState::MODE_VLA_ASSISTED ||
+    request->requested_mode == vehicle_interfaces::msg::SystemState::MODE_VLA_AUTONOMOUS;
+  if (requires_policy && !policy_ready_) {
+    response->message = "Policy is not ready for vehicle control mode";
     return;
   }
   set_mode(request->requested_mode, request->reason);

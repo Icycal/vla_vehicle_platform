@@ -226,6 +226,10 @@ The persistent Provider keeps the model loaded and accepts real Observation requ
 Socket. Its default action adapter emits zero Twist candidates even though real model inference is
 executed. See `docs/POLICY_RUNTIME.md` before enabling any explicit Shadow-only affine mapping.
 
+## Mobile Teleop
+
+手机连接车辆局域网后访问 http://<vehicle-ip>:8088/teleop，通过控制租约、Deadman、Mux 和 Safety Guard 遥控车辆并同步采集训练 Episode。详见 docs/MOBILE_TELEOP.md。
+
 ## Vehicle Ops Console
 
 Build and start the independent internal operations console:

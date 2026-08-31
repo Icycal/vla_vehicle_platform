@@ -1,5 +1,9 @@
 string run_id
 string stage
+string mobility_plugin_id
+bool execute_command
+string operator_confirmation
+uint32 execution_duration_ms
 ---
 bool accepted
 string result_json
