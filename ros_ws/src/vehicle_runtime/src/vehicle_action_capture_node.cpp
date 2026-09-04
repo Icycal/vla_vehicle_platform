@@ -1,7 +1,9 @@
 #include <geometry_msgs/msg/twist.hpp>
 #include <geometry_msgs/msg/twist_stamped.hpp>
 #include <rclcpp/rclcpp.hpp>
+#include <std_msgs/msg/bool.hpp>
 #include <vehicle_interfaces/msg/policy_observation.hpp>
+#include <vehicle_interfaces/msg/safety_event.hpp>
 #include <vehicle_interfaces/msg/training_action.hpp>
 
 #include <algorithm>
@@ -50,6 +52,22 @@ public:
     executed_subscription_ = create_subscription<geometry_msgs::msg::Twist>(
       "/cmd_vel", 10,
       std::bind(&VehicleActionCapture::on_executed, this, std::placeholders::_1));
+    manual_override_subscription_ = create_subscription<std_msgs::msg::Bool>(
+      "/mobile_teleop/manual_obstacle_override", 10,
+      [this](std_msgs::msg::Bool::SharedPtr message) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        manual_obstacle_override_ = message->data;
+      });
+    safety_event_subscription_ = create_subscription<vehicle_interfaces::msg::SafetyEvent>(
+      "/vla/safety_event", 10,
+      [this](vehicle_interfaces::msg::SafetyEvent::SharedPtr message) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (message->active) {
+          active_safety_rule_ = message->rule_id;
+        } else if (active_safety_rule_ == message->rule_id) {
+          active_safety_rule_.clear();
+        }
+      });
   }
 
 private:
@@ -64,6 +82,8 @@ private:
     {
       std::lock_guard<std::mutex> lock(mutex_);
       action.observation_id = observation_id_;
+      action.safety_reasons.push_back(
+        manual_obstacle_override_ ? "safety_mode:manual_obstacle_override" : "safety_mode:normal");
     }
     action.source = source;
     if (adapter_ == "twist") {
@@ -107,9 +127,13 @@ private:
   {
     auto action = encode(*message, now(), "control.executed");
     std::vector<float> target_values;
+    std::string active_safety_rule;
+    bool manual_obstacle_override = false;
     {
       std::lock_guard<std::mutex> lock(mutex_);
       target_values = latest_target_values_;
+      active_safety_rule = active_safety_rule_;
+      manual_obstacle_override = manual_obstacle_override_;
     }
     action.safety_intervened = target_values.size() == action.values.size() &&
       !std::equal(
@@ -117,8 +141,12 @@ private:
       [this](const float left, const float right) {
         return std::abs(left - right) <= comparison_tolerance_;
       });
+    if (manual_obstacle_override) {
+      action.safety_reasons.push_back("obstacle_override");
+    }
     if (action.safety_intervened) {
-      action.safety_reasons = {"safety_or_control_adjustment"};
+      action.safety_reasons.push_back(
+        active_safety_rule.empty() ? "safety_or_control_adjustment" : active_safety_rule);
     }
     executed_publisher_->publish(action);
   }
@@ -130,11 +158,15 @@ private:
   mutable std::mutex mutex_;
   std::string observation_id_;
   std::vector<float> latest_target_values_;
+  bool manual_obstacle_override_{false};
+  std::string active_safety_rule_;
   rclcpp::Publisher<vehicle_interfaces::msg::TrainingAction>::SharedPtr target_publisher_;
   rclcpp::Publisher<vehicle_interfaces::msg::TrainingAction>::SharedPtr executed_publisher_;
   rclcpp::Subscription<vehicle_interfaces::msg::PolicyObservation>::SharedPtr observation_subscription_;
   rclcpp::Subscription<geometry_msgs::msg::TwistStamped>::SharedPtr selected_subscription_;
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr executed_subscription_;
+  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr manual_override_subscription_;
+  rclcpp::Subscription<vehicle_interfaces::msg::SafetyEvent>::SharedPtr safety_event_subscription_;
 };
 
 int main(int argc, char ** argv)

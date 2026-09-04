@@ -2,6 +2,7 @@
 #include <geometry_msgs/msg/twist_stamped.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/laser_scan.hpp>
+#include <std_msgs/msg/bool.hpp>
 #include <vehicle_interfaces/msg/safety_event.hpp>
 
 #include <algorithm>
@@ -32,6 +33,8 @@ public:
     const auto selected_command_topic = declare_parameter<std::string>(
       "selected_command_topic", "/control/cmd_vel_selected");
     const auto scan_topic = declare_parameter<std::string>("scan_topic", "/scan");
+    const auto manual_override_topic = declare_parameter<std::string>(
+      "manual_override_topic", "/mobile_teleop/manual_obstacle_override");
 
     command_publisher_ = create_publisher<geometry_msgs::msg::Twist>(output_topic, 10);
     event_publisher_ = create_publisher<vehicle_interfaces::msg::SafetyEvent>(
@@ -48,6 +51,11 @@ public:
     scan_subscription_ = create_subscription<sensor_msgs::msg::LaserScan>(
       scan_topic, rclcpp::SensorDataQoS(),
       std::bind(&VlaSafetyGuard::on_scan, this, std::placeholders::_1));
+    manual_override_subscription_ = create_subscription<std_msgs::msg::Bool>(
+      manual_override_topic, 10, [this](std_msgs::msg::Bool::SharedPtr message) {
+        manual_obstacle_override_ = message->data;
+        manual_override_stamp_ = now();
+      });
 
     const auto period = std::chrono::duration<double>(
       1.0 / std::max(publish_frequency, 1.0));
@@ -116,7 +124,9 @@ private:
     }
 
     const bool scan_fresh = is_fresh(scan_stamp_, scan_timeout_);
-    if (require_scan_ && !scan_fresh) {
+    const bool manual_override_active = manual_obstacle_override_ &&
+      is_fresh(manual_override_stamp_, command_timeout_);
+    if (require_scan_ && !scan_fresh && !manual_override_active) {
       publish_event(
         vehicle_interfaces::msg::SafetyEvent::SEVERITY_STOP,
         "scan_timeout", "Required obstacle scan is unavailable");
@@ -134,10 +144,18 @@ private:
     output.angular.z = std::clamp(
       output.angular.z, -std::abs(max_angular_velocity_), std::abs(max_angular_velocity_));
 
+    if (manual_override_active) {
+      publish_event(
+        vehicle_interfaces::msg::SafetyEvent::SEVERITY_WARNING,
+        "manual_obstacle_override", "Operator accepted responsibility for obstacle avoidance");
+      command_publisher_->publish(output);
+      return;
+    }
+
     if (output.linear.x > 0.0 && scan_fresh && minimum_front_range_ < stop_distance_) {
       publish_event(
-        vehicle_interfaces::msg::SafetyEvent::SEVERITY_STOP,
-        "front_obstacle", "Obstacle is inside the configured stop distance");
+        vehicle_interfaces::msg::SafetyEvent::SEVERITY_WARNING,
+        "front_obstacle", "Forward command blocked by obstacle; reverse escape remains available");
       command_publisher_->publish(geometry_msgs::msg::Twist{});
       return;
     }
@@ -154,16 +172,19 @@ private:
   double stop_distance_{0.45};
   double obstacle_half_angle_{0.52};
   bool require_scan_{false};
+  bool manual_obstacle_override_{false};
   double minimum_front_range_{std::numeric_limits<double>::infinity()};
   uint8_t active_severity_{vehicle_interfaces::msg::SafetyEvent::SEVERITY_INFO};
   std::string active_rule_;
   geometry_msgs::msg::Twist selected_command_;
   rclcpp::Time command_stamp_{0, 0, RCL_ROS_TIME};
   rclcpp::Time scan_stamp_{0, 0, RCL_ROS_TIME};
+  rclcpp::Time manual_override_stamp_{0, 0, RCL_ROS_TIME};
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr command_publisher_;
   rclcpp::Publisher<vehicle_interfaces::msg::SafetyEvent>::SharedPtr event_publisher_;
   rclcpp::Subscription<geometry_msgs::msg::TwistStamped>::SharedPtr command_subscription_;
   rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_subscription_;
+  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr manual_override_subscription_;
   rclcpp::TimerBase::SharedPtr timer_;
 };
 

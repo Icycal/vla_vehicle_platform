@@ -13,6 +13,7 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_action REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(vehicle_interfaces REQUIRED)
@@ -22,6 +23,7 @@ add_executable(vehicle_ops_api src/vehicle_ops_api_node.cpp src/job_manager.cpp)
 ament_target_dependencies(
   vehicle_ops_api
   geometry_msgs
+  nav_msgs
   rclcpp
   rclcpp_action
   sensor_msgs

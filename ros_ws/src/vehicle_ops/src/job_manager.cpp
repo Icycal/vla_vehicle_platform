@@ -257,6 +257,24 @@ std::string JobManager::create(const std::string & request_body)
     }
     job->command = {(scripts / "install_policy_model.sh").string(),
       provider, version, model_id, revision, dataset_id};
+  } else if (type == "policy.model_import") {
+    static const std::regex provider_pattern("[a-z][a-z0-9_-]{1,31}");
+    static const std::regex version_pattern("[A-Za-z0-9][A-Za-z0-9._-]{0,79}");
+    static const std::regex path_pattern("[A-Za-z0-9_./-]{1,240}");
+    static const std::regex dataset_pattern("[A-Za-z0-9._/-]{0,160}");
+    if (parameters.size() < 3 || parameters.size() > 4) {
+      throw std::invalid_argument(
+              "policy.model_import accepts provider, version, source_path and optional dataset_id");
+    }
+    const auto provider = checked_value(parameters, "provider", provider_pattern);
+    if (provider != "smolvla") {throw std::invalid_argument("Model provider is not registered");}
+    const auto dataset_id = parameters.value("dataset_id", std::string{});
+    if (!std::regex_match(dataset_id, dataset_pattern)) {
+      throw std::invalid_argument("Parameter 'dataset_id' has an invalid format");
+    }
+    job->command = {(scripts / "import_policy_model.sh").string(), provider,
+      checked_value(parameters, "version", version_pattern),
+      checked_value(parameters, "source_path", path_pattern), dataset_id};
   } else if (type == "policy.model_activate") {
     static const std::regex provider_pattern("[a-z][a-z0-9_-]{1,31}");
     static const std::regex version_pattern("[A-Za-z0-9][A-Za-z0-9._-]{0,79}");
@@ -267,6 +285,20 @@ std::string JobManager::create(const std::string & request_body)
     if (provider != "smolvla") {throw std::invalid_argument("Model provider is not registered");}
     job->command = {(scripts / "activate_policy_model.sh").string(), provider,
       checked_value(parameters, "version", version_pattern)};
+  } else if (type == "policy.model_variant") {
+    static const std::regex provider_pattern("[a-z][a-z0-9_-]{1,31}");
+    static const std::regex version_pattern("[A-Za-z0-9][A-Za-z0-9._-]{0,79}");
+    static const std::regex precision_pattern("(mixed|float32|float16|bfloat16|int8)");
+    if (parameters.size() != 4) {
+      throw std::invalid_argument(
+              "policy.model_variant accepts provider, source_version, target_version and precision");
+    }
+    const auto provider = checked_value(parameters, "provider", provider_pattern);
+    if (provider != "smolvla") {throw std::invalid_argument("Model provider is not registered");}
+    job->command = {(scripts / "prepare_policy_model_variant.sh").string(), provider,
+      checked_value(parameters, "source_version", version_pattern),
+      checked_value(parameters, "target_version", version_pattern),
+      checked_value(parameters, "precision", precision_pattern)};
   } else {
     throw std::invalid_argument("Unsupported job_type");
   }

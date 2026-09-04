@@ -5,6 +5,7 @@
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
 #include <geometry_msgs/msg/twist.hpp>
+#include <nav_msgs/msg/odometry.hpp>
 #include <sensor_msgs/msg/compressed_image.hpp>
 #include <sensor_msgs/msg/image.hpp>
 #include <std_msgs/msg/string.hpp>
@@ -37,6 +38,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cmath>
 #include <cctype>
 #include <cerrno>
@@ -476,6 +478,8 @@ private:
   bool fresh(double value) const {return value >= 0.0 && value <= stale_seconds_ * 1000.0;}
   void start_server();
   void server_loop();
+  void worker_loop();
+  void handle_client(int client);
   HttpRequest read_request(int client) const;
   void send_response(int client, const HttpResponse & response) const;
   static void send_all(int client, const std::string & data);
@@ -524,13 +528,19 @@ private:
   static HttpResponse success(const std::string & message, const std::string & extra = "");
   static HttpResponse error(int status, const std::string & message);
   std::string bind_, token_, web_root_, project_root_, jobs_root_;
-  int port_{8088}, limit_{1048576};
+  int port_{8088}, limit_{1048576}, http_worker_count_{8}, http_queue_limit_{32};
+  double http_socket_timeout_seconds_{3.0};
   double service_seconds_{2.0}, stale_seconds_{3.0}, debug_timeout_seconds_{45.0};
   double camera_dark_mean_threshold_{2.0}, command_timeout_seconds_{0.5};
+  double odometry_timeout_seconds_{0.5};
   double stationary_linear_threshold_{0.02}, stationary_angular_threshold_{0.05};
   std::atomic<bool> running_{false};
   int server_{-1};
   std::thread thread_;
+  std::vector<std::thread> worker_threads_;
+  std::mutex client_queue_mutex_;
+  std::condition_variable client_queue_condition_;
+  std::deque<int> client_queue_;
   std::unique_ptr<vehicle_ops::JobManager> jobs_;
   std::mutex mutex_;
   Timed<vehicle_interfaces::msg::SystemState> system_;
@@ -553,6 +563,8 @@ private:
   unsigned int camera_max_intensity_{0};
   geometry_msgs::msg::Twist latest_command_;
   std::chrono::steady_clock::time_point command_received_{};
+  nav_msgs::msg::Odometry latest_odometry_;
+  std::chrono::steady_clock::time_point odometry_received_{};
   struct ActiveDebugSession {
     std::string id;
     std::string task;
@@ -582,6 +594,7 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr raw_camera_sub_;
   rclcpp::Subscription<sensor_msgs::msg::CompressedImage>::SharedPtr camera_sub_;
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr command_sub_;
+  rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odometry_sub_;
   rclcpp::Subscription<vehicle_interfaces::msg::ControlLease>::SharedPtr control_lease_sub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr task_pub_;
   rclcpp::Publisher<vehicle_interfaces::msg::TeleopCommand>::SharedPtr teleop_command_pub_;
@@ -606,11 +619,15 @@ VehicleOpsApi::VehicleOpsApi() : Node("vehicle_ops_api")
   bind_ = declare_parameter<std::string>("bind_address", "0.0.0.0");
   port_ = declare_parameter<int>("port", 8088);
   limit_ = declare_parameter<int>("request_limit_bytes", 1048576);
+  http_worker_count_ = declare_parameter<int>("http_worker_count", 8);
+  http_queue_limit_ = declare_parameter<int>("http_queue_limit", 32);
+  http_socket_timeout_seconds_ = declare_parameter<double>("http_socket_timeout_seconds", 3.0);
   service_seconds_ = declare_parameter<double>("service_timeout_seconds", 2.0);
   stale_seconds_ = declare_parameter<double>("stale_after_seconds", 3.0);
   debug_timeout_seconds_ = declare_parameter<double>("debug_timeout_seconds", 45.0);
   camera_dark_mean_threshold_ = declare_parameter<double>("camera_dark_mean_threshold", 2.0);
   command_timeout_seconds_ = declare_parameter<double>("runtime_switch_command_timeout_seconds", 0.5);
+  odometry_timeout_seconds_ = declare_parameter<double>("teleop_odometry_timeout_seconds", 0.5);
   stationary_linear_threshold_ = declare_parameter<double>("runtime_switch_stationary_linear_threshold", 0.02);
   stationary_angular_threshold_ = declare_parameter<double>("runtime_switch_stationary_angular_threshold", 0.05);
   token_ = declare_parameter<std::string>("operator_token", "");
@@ -622,6 +639,9 @@ VehicleOpsApi::VehicleOpsApi() : Node("vehicle_ops_api")
   {
     throw std::invalid_argument("Invalid port, web_root, project_root, or jobs_root");
   }
+  http_worker_count_ = std::clamp(http_worker_count_, 1, 32);
+  http_queue_limit_ = std::clamp(http_queue_limit_, http_worker_count_, 256);
+  http_socket_timeout_seconds_ = std::clamp(http_socket_timeout_seconds_, 0.5, 30.0);
   const auto state_qos = rclcpp::QoS(1).reliable().transient_local();
   system_sub_ = create_subscription<vehicle_interfaces::msg::SystemState>(
     "/vehicle/system_state", state_qos, [this](vehicle_interfaces::msg::SystemState::SharedPtr message) {update(system_, *message);});
@@ -692,6 +712,12 @@ VehicleOpsApi::VehicleOpsApi() : Node("vehicle_ops_api")
       latest_command_ = *message;
       command_received_ = std::chrono::steady_clock::now();
     });
+  odometry_sub_ = create_subscription<nav_msgs::msg::Odometry>(
+    "/odom", rclcpp::SensorDataQoS(), [this](nav_msgs::msg::Odometry::SharedPtr message) {
+      std::lock_guard<std::mutex> lock(mutex_);
+      latest_odometry_ = *message;
+      odometry_received_ = std::chrono::steady_clock::now();
+    });
   control_lease_sub_ = create_subscription<vehicle_interfaces::msg::ControlLease>(
     "/vehicle/control_lease", state_qos,
     [this](vehicle_interfaces::msg::ControlLease::SharedPtr message) {
@@ -727,7 +753,11 @@ VehicleOpsApi::~VehicleOpsApi()
 {
   running_ = false;
   if (server_ >= 0) {::shutdown(server_, SHUT_RDWR); ::close(server_);}
+  client_queue_condition_.notify_all();
   if (thread_.joinable()) {thread_.join();}
+  for (auto & worker : worker_threads_) {
+    if (worker.joinable()) {worker.join();}
+  }
 }
 
 void VehicleOpsApi::start_server()
@@ -749,21 +779,67 @@ void VehicleOpsApi::start_server()
     throw std::runtime_error("HTTP server setup failed: " + message);
   }
   running_ = true;
+  worker_threads_.reserve(static_cast<std::size_t>(http_worker_count_));
+  for (int index = 0; index < http_worker_count_; ++index) {
+    worker_threads_.emplace_back([this]() {worker_loop();});
+  }
   thread_ = std::thread([this]() {server_loop();});
 }
 void VehicleOpsApi::server_loop()
 {
   while (running_) {
     const int client = ::accept(server_, nullptr, nullptr);
-    if (client < 0) {continue;}
-    timeval timeout{5, 0};
-    ::setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
-    try {send_response(client, route(read_request(client)));}
-    catch (const std::length_error & e) {send_response(client, error(413, e.what()));}
-    catch (const std::exception & e) {send_response(client, error(400, e.what()));}
-    ::shutdown(client, SHUT_RDWR);
-    ::close(client);
+    if (client < 0) {
+      if (!running_) {break;}
+      if (errno == EINTR) {continue;}
+      continue;
+    }
+    bool accepted = false;
+    {
+      std::lock_guard<std::mutex> lock(client_queue_mutex_);
+      if (client_queue_.size() < static_cast<std::size_t>(http_queue_limit_)) {
+        client_queue_.push_back(client);
+        accepted = true;
+      }
+    }
+    if (accepted) {
+      client_queue_condition_.notify_one();
+    } else {
+      ::shutdown(client, SHUT_RDWR);
+      ::close(client);
+    }
   }
+}
+void VehicleOpsApi::worker_loop()
+{
+  while (true) {
+    int client = -1;
+    {
+      std::unique_lock<std::mutex> lock(client_queue_mutex_);
+      client_queue_condition_.wait(lock, [this]() {return !running_ || !client_queue_.empty();});
+      if (client_queue_.empty()) {
+        if (!running_) {return;}
+        continue;
+      }
+      client = client_queue_.front();
+      client_queue_.pop_front();
+    }
+    handle_client(client);
+  }
+}
+void VehicleOpsApi::handle_client(int client)
+{
+  const auto timeout_seconds = static_cast<long>(http_socket_timeout_seconds_);
+  const auto timeout_microseconds = static_cast<long>(
+    (http_socket_timeout_seconds_ - static_cast<double>(timeout_seconds)) * 1000000.0);
+  timeval timeout{timeout_seconds, timeout_microseconds};
+  ::setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+  ::setsockopt(client, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+  try {send_response(client, route(read_request(client)));}
+  catch (const std::length_error & e) {send_response(client, error(413, e.what()));}
+  catch (const std::exception & e) {send_response(client, error(400, e.what()));}
+  ::shutdown(client, SHUT_RDWR);
+  ::close(client);
 }
 HttpRequest VehicleOpsApi::read_request(int client) const
 {
@@ -836,6 +912,7 @@ void VehicleOpsApi::send_all(int client, const std::string & data)
   std::size_t sent = 0;
   while (sent < data.size()) {
     const auto count = ::send(client, data.data() + sent, data.size() - sent, MSG_NOSIGNAL);
+    if (count < 0 && errno == EINTR) {continue;}
     if (count <= 0) {return;}
     sent += static_cast<std::size_t>(count);
   }
@@ -1419,11 +1496,51 @@ HttpResponse VehicleOpsApi::models_catalog()
       {"action_schema", ""}, {"recommended_plugin_ids", nlohmann::json::array()},
       {"active_plugin_id", active_plugin_id}, {"active_plugin_compatible", true},
       {"activation_allowed", true}, {"uses_zero_adapter", true}};
+    nlohmann::json runtime_compatibility{{"status", "compatible"},
+      {"backend", "pytorch"}, {"weight_precision", "mixed"},
+      {"activation_precision", "bfloat16"}, {"activation_allowed", true},
+      {"message", "Legacy model uses the PyTorch mixed-precision runtime"}};
     const auto manifest_path = model_path / "vehicle_model_manifest.json";
     if (fs::exists(manifest_path)) {
       try {
         item["manifest"] = read_json_file(manifest_path);
         const auto & manifest = item["manifest"];
+        const auto inference = manifest.contains("inference") && manifest["inference"].is_object() ?
+          manifest["inference"] : nlohmann::json::object();
+        const std::string backend = inference.value("backend", "pytorch");
+        const std::string weight_precision = inference.value(
+          "weight_precision", inference.value("precision", "mixed"));
+        runtime_compatibility["backend"] = backend;
+        runtime_compatibility["weight_precision"] = weight_precision;
+        runtime_compatibility["activation_precision"] = inference.value(
+          "activation_precision", "bfloat16");
+        if (backend != "pytorch") {
+          runtime_compatibility["status"] = "unsupported_backend";
+          runtime_compatibility["activation_allowed"] = false;
+          runtime_compatibility["message"] =
+            "Current platform build does not provide this inference backend";
+        } else if (weight_precision == "int8") {
+          const auto quantization = inference.contains("quantization") &&
+            inference["quantization"].is_object() ?
+            inference["quantization"] : nlohmann::json::object();
+          const std::string engine = quantization.value("engine", "pytorch-native");
+          if (engine != "torchao" && engine != "pytorch-native") {
+            runtime_compatibility["status"] = "unsupported_quantization";
+            runtime_compatibility["activation_allowed"] = false;
+            runtime_compatibility["message"] =
+              "INT8 requires the native PyTorch or TorchAO weight-only backend";
+          } else if (engine == "torchao") {
+            runtime_compatibility["status"] = "requires_runtime_check";
+            runtime_compatibility["message"] =
+              "Activation will verify TorchAO in the selected runtime image";
+          } else {
+            runtime_compatibility["message"] =
+              "Portable PyTorch INT8 reference backend is available";
+          }
+        } else {
+          runtime_compatibility["message"] =
+            "Model precision is supported by the PyTorch backend";
+        }
         if (manifest.contains("action") && !manifest["action"].is_null() &&
           !manifest["action"].is_object())
         {
@@ -1459,9 +1576,15 @@ HttpResponse VehicleOpsApi::models_catalog()
         compatibility["status"] = "manifest_error";
         compatibility["active_plugin_compatible"] = false;
         compatibility["activation_allowed"] = false;
+        runtime_compatibility["status"] = "manifest_error";
+        runtime_compatibility["activation_allowed"] = false;
+        runtime_compatibility["message"] = "Model runtime manifest cannot be parsed";
       }
     }
+    compatibility["activation_allowed"] = compatibility.value("activation_allowed", true) &&
+      runtime_compatibility.value("activation_allowed", true);
     item["compatibility"] = std::move(compatibility);
+    item["runtime_compatibility"] = std::move(runtime_compatibility);
     result["models"].push_back(item);
   };
   append_model(fs::path(project_root_) / "run/models/smolvla_base", "smolvla", "legacy-base", false);
@@ -1579,6 +1702,12 @@ HttpResponse VehicleOpsApi::teleop_status()
   }
   response["executed_command"] = {{"linear_x", latest_command_.linear.x},
     {"angular_z", latest_command_.angular.z}};
+  const bool odometry_available = odometry_received_.time_since_epoch().count() != 0 &&
+    std::chrono::duration<double>(std::chrono::steady_clock::now() - odometry_received_).count() <=
+    odometry_timeout_seconds_;
+  response["measured_motion"] = {{"available", odometry_available},
+    {"linear_x", latest_odometry_.twist.twist.linear.x},
+    {"angular_z", latest_odometry_.twist.twist.angular.z}};
   return {200, "application/json; charset=utf-8", response.dump(),
     {{"Cache-Control", "no-store"}}};
 }
@@ -1643,6 +1772,7 @@ HttpResponse VehicleOpsApi::teleop_command(const std::string & body)
   const std::string controller_id = input.value("controller_id", "");
   const std::uint64_t sequence = input.value("sequence", std::uint64_t{0});
   const bool deadman = input.value("deadman", false);
+  const bool manual_obstacle_override = input.value("manual_obstacle_override", false);
   const double linear = input.value("linear", 0.0);
   const double angular = input.value("angular", 0.0);
   const int valid_for_ms = std::clamp(input.value("valid_for_ms", 250), 50, 300);
@@ -1670,6 +1800,7 @@ HttpResponse VehicleOpsApi::teleop_command(const std::string & body)
   command.valid_for.sec = valid_for_ms / 1000;
   command.valid_for.nanosec = static_cast<std::uint32_t>(valid_for_ms % 1000) * 1000000U;
   command.deadman = deadman;
+  command.manual_obstacle_override = deadman && manual_obstacle_override;
   command.linear_normalized = static_cast<float>(linear);
   command.angular_normalized = static_cast<float>(angular);
   teleop_command_pub_->publish(command);

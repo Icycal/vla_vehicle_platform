@@ -14,6 +14,16 @@ for required in config.json model.safetensors policy_preprocessor.json policy_po
 done
 [[ -f "${ENV_FILE}" ]] || { echo "Runtime environment file not found: ${ENV_FILE}" >&2; exit 2; }
 
+python3 "${PROJECT_ROOT}/tools/model/inspect_model_runtime.py" --model-dir "${MODEL_ROOT}"
+RUNTIME_IMAGE="$(awk -F= '$1 == "SMOLVLA_RUNTIME_IMAGE" {print substr($0, index($0, "=") + 1)}' "${ENV_FILE}" | tail -1)"
+RUNTIME_IMAGE="${RUNTIME_IMAGE:-vla-smolvla-runtime:0.1}"
+WEIGHT_PRECISION="$(python3 -c 'import json,sys; from pathlib import Path; p=Path(sys.argv[1])/"vehicle_model_manifest.json"; m=json.loads(p.read_text()) if p.is_file() else {}; i=m.get("inference") or m.get("runtime") or {}; print(i.get("weight_precision", i.get("precision", "mixed")))' "${MODEL_ROOT}")"
+QUANTIZATION_ENGINE="$(python3 -c 'import json,sys; from pathlib import Path; p=Path(sys.argv[1])/"vehicle_model_manifest.json"; m=json.loads(p.read_text()) if p.is_file() else {}; i=m.get("inference") or m.get("runtime") or {}; q=i.get("quantization") or {}; print(q.get("engine", "pytorch-native"))' "${MODEL_ROOT}")"
+if [[ "${WEIGHT_PRECISION}" == "int8" && "${QUANTIZATION_ENGINE}" == "torchao" ]]; then
+  docker run --rm --network none --entrypoint python3 "${RUNTIME_IMAGE}" \
+    -c 'import torchao; print("TorchAO runtime available:", torchao.__version__)'
+fi
+
 MODEL_ID="${VERSION}"
 if [[ -f "${MODEL_ROOT}/vehicle_model_manifest.json" ]]; then
   MODEL_ID="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8")).get("model_id") or sys.argv[2])' "${MODEL_ROOT}/vehicle_model_manifest.json" "${VERSION}")"

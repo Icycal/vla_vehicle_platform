@@ -4,5 +4,6 @@ string controller_id
 uint64 sequence
 builtin_interfaces/Duration valid_for
 bool deadman
+bool manual_obstacle_override
 float32 linear_normalized
 float32 angular_normalized

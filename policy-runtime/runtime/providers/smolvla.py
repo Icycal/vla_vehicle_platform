@@ -5,6 +5,8 @@ import time
 from pathlib import Path
 
 from runtime.action_adapters import create_action_adapter
+from runtime.inference_backends import create_smolvla_backend
+from runtime.model_manifest import load_model_runtime_manifest
 
 from .base import PolicyProvider
 
@@ -48,6 +50,7 @@ class SmolVLAPolicyProvider(PolicyProvider):
             0, int(os.environ.get("SMOLVLA_RESPONSE_MARGIN_MS", "500")) * 1_000_000
         )
         self._adapter = create_action_adapter(self._model_dir)
+        self._runtime_manifest = load_model_runtime_manifest(self._model_dir, "smolvla")
         self._predict_lock = threading.Lock()
         self._request_counter = 0
         self._ready = False
@@ -93,53 +96,24 @@ class SmolVLAPolicyProvider(PolicyProvider):
 
     def _format_status(self, state: str) -> str:
         return (
-            f"SmolVLA {state}; adapter={self._adapter.adapter_id}; "
+            f"SmolVLA {state}; backend={self._runtime_manifest.inference.backend}; "
+            f"precision={self._runtime_manifest.inference.weight_precision}; "
+            f"adapter={self._adapter.adapter_id}; "
             f"last_inference_ms={self._last_inference_ms:.1f}"
         )
 
     def _load_model(self) -> None:
-        import torch
-        from lerobot.configs.policies import PreTrainedConfig
-        from lerobot.policies.factory import make_pre_post_processors
-        from lerobot.policies.smolvla.modeling_smolvla import SmolVLAPolicy
-        from lerobot.utils.control_utils import prepare_observation_for_inference
-
-        if not torch.cuda.is_available():
-            raise RuntimeError("CUDA is not available")
         if not self._model_dir.is_dir():
             raise FileNotFoundError(f"SmolVLA model directory not found: {self._model_dir}")
-        dependency = json.loads(self._vlm_manifest.read_text(encoding="utf-8"))
-        vlm_path = Path(dependency["snapshot_path"])
-        if not vlm_path.is_dir():
-            raise FileNotFoundError(f"SmolVLM snapshot not found: {vlm_path}")
-
-        config = PreTrainedConfig.from_pretrained(self._model_dir, local_files_only=True)
-        config.device = "cuda"
-        config.vlm_model_name = str(vlm_path)
-        load_started = time.perf_counter()
-        policy = SmolVLAPolicy.from_pretrained(
-            self._model_dir, config=config, local_files_only=True, strict=True
+        self._backend = create_smolvla_backend(
+            self._model_dir, self._vlm_manifest, self._runtime_manifest
         )
-        policy.eval()
-        policy.reset()
-        preprocessor, postprocessor = make_pre_post_processors(
-            policy_cfg=config,
-            pretrained_path=str(self._model_dir),
-            preprocessor_overrides={
-                "tokenizer_processor": {"tokenizer_name": str(vlm_path)},
-                "device_processor": {"device": "cuda"},
-            },
-        )
-        torch.cuda.synchronize()
-        self._torch = torch
-        self._numpy = __import__("numpy")
-        self._cv2 = __import__("cv2")
-        self._policy = policy
-        self._preprocessor = preprocessor
-        self._postprocessor = postprocessor
-        self._prepare_observation_for_inference = prepare_observation_for_inference
-        self._device = torch.device("cuda")
-        self._load_seconds = time.perf_counter() - load_started
+        self._backend.load()
+        self._torch = self._backend.torch
+        self._numpy = self._backend.numpy
+        self._cv2 = self._backend.cv2
+        self._device = self._backend.device
+        self._load_seconds = self._backend.load_seconds
         if os.environ.get("SMOLVLA_WARMUP", "1") == "1":
             synthetic_image = self._numpy.zeros((256, 256, 3), dtype=self._numpy.uint8)
             synthetic_state = self._numpy.zeros(len(self._state_keys), dtype=self._numpy.float32)
@@ -186,25 +160,18 @@ class SmolVLAPolicyProvider(PolicyProvider):
         raw_observation = {"observation.state": state}
         for camera_key in self._model_camera_keys:
             raw_observation[camera_key] = image
-        model_input = self._prepare_observation_for_inference(
-            raw_observation, device=self._device, task=task
-        )
-        return self._preprocessor(model_input)
+        return self._backend.prepare(raw_observation, task)
 
     def _infer_normalized_chunk(self, model_input):
-        self._torch.cuda.synchronize()
-        inference_started = time.perf_counter()
-        with self._torch.inference_mode():
-            normalized_chunk = self._policy.predict_action_chunk(model_input)
-        self._torch.cuda.synchronize()
-        self._last_inference_ms = (time.perf_counter() - inference_started) * 1000.0
+        normalized_chunk = self._backend.predict(model_input)
+        self._last_inference_ms = self._backend.last_inference_ms
         return normalized_chunk
 
     def _postprocess_actions(self, normalized_chunk, action_count: int):
         raw_actions = []
         for action_index in range(action_count):
             normalized_action = normalized_chunk[:, action_index]
-            action = self._postprocessor(normalized_action)
+            action = self._backend.postprocess(normalized_action)
             raw_actions.append(action.squeeze(0).detach().cpu().numpy().astype(float).tolist())
         return raw_actions
 
@@ -254,6 +221,7 @@ class SmolVLAPolicyProvider(PolicyProvider):
             "stage": stage,
             "provider_id": self.provider_id,
             "model_id": self.model_id,
+            "runtime": self._backend.runtime_info,
             "observation": {
                 "observation_id": request.observation_id,
                 "task": request.task,

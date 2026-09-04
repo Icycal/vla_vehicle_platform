@@ -207,9 +207,19 @@ void write_float_array(std::ostream & output, const std::vector<float> & values)
   output << ']';
 }
 
+bool has_safety_reason(
+  const vehicle_interfaces::msg::TrainingAction & action, const std::string & reason)
+{
+  return std::find(action.safety_reasons.begin(), action.safety_reasons.end(), reason) !=
+         action.safety_reasons.end();
+}
+
 void write_training_action(
   std::ostream & output, const vehicle_interfaces::msg::TrainingAction & action)
 {
+  const bool obstacle_override = has_safety_reason(action, "obstacle_override") ||
+    has_safety_reason(action, "manual_obstacle_override");
+  const std::string safety_mode = obstacle_override ? "manual_obstacle_override" : "normal";
   output << "{\"schema\":\"" << json_escape(action.action_schema) << "\""
          << ",\"schema_hash\":\"" << json_escape(action.schema_hash) << "\""
          << ",\"feature_names\":";
@@ -219,6 +229,8 @@ void write_training_action(
   output << ",\"values\":";
   write_float_array(output, action.values);
   output << ",\"source\":\"" << json_escape(action.source) << "\""
+         << ",\"safety_mode\":\"" << safety_mode << "\""
+         << ",\"obstacle_override\":" << (obstacle_override ? "true" : "false")
          << ",\"safety_intervened\":" << (action.safety_intervened ? "true" : "false")
          << ",\"safety_reasons\":";
   write_string_array(output, action.safety_reasons);

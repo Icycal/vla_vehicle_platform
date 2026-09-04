@@ -33,7 +33,17 @@ def main() -> int:
     action["schema_hash"] = schema_hash(action)
     manifest_path = model_dir / "vehicle_model_manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.is_file() else {}
-    manifest["schema_version"] = "vehicle.policy-model.v1"
+    manifest["schema_version"] = "chitu.policy-model.v2"
+    manifest.setdefault(
+        "inference",
+        {
+            "backend": "pytorch",
+            "artifact_format": "safetensors",
+            "weight_precision": "mixed",
+            "activation_precision": "bfloat16",
+            "quantization": {"engine": "none", "scheme": "none"},
+        },
+    )
     manifest["action"] = action
     manifest["dataset_id"] = dataset_manifest.get("repo_id", manifest.get("dataset_id", ""))
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")

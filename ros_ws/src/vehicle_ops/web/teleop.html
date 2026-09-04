@@ -9,7 +9,7 @@
   <title>赤兔遥控 · Chitu Teleop</title>
   <link rel="icon" href="/favicon.svg">
   <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="stylesheet" href="/assets/teleop.css?v=20260831-camera">
+  <link rel="stylesheet" href="/assets/teleop.css?v=20260903-safe-data">
 </head>
 <body>
   <header class="teleop-header">
@@ -46,8 +46,8 @@
       <div class="camera-float-grip" aria-hidden="true"></div>
       <div class="camera-readout">
         <div><small>控制模式</small><strong id="modeReadout">--</strong></div>
-        <div><small>实际速度</small><strong><span id="executedLinear">0.00</span> m/s</strong></div>
-        <div><small>实际转向</small><strong><span id="executedAngular">0.00</span> rad/s</strong></div>
+        <div><small>安全输出指令</small><strong><span id="executedLinear">0.00</span> m/s · <span id="executedAngular">0.00</span> rad/s</strong></div>
+        <div><small>车辆实测反馈</small><strong id="measuredMotion">--</strong></div>
       </div>
     </section>
 
@@ -86,6 +86,10 @@
           <input type="checkbox" id="safetyConfirmed">
           <span><b>车辆周围安全，可以开始遥控</b><small>确认车辆已架空或处于可控空旷区域</small></span>
         </label>
+        <label class="manual-confirm">
+          <input type="checkbox" id="manualObstacleOverride">
+          <span><b>完全手动模式</b><small>旁路激光雷达障碍物判断，由操作员负责避障；急停、限速、控制租约、松手归零和命令超时仍然有效。</small></span>
+        </label>
         <div class="control-actions">
           <button class="button primary" id="acquireLease">申请控制权</button>
           <button class="button secondary" id="releaseLease" disabled>释放控制权</button>
@@ -118,7 +122,10 @@
             <div><span>前视相机</span><strong id="cameraState">--</strong></div>
             <div><span>车辆底盘</span><strong id="chassisDetailState">--</strong></div>
           </div>
-          <button class="button secondary full" id="startChassis">启动底盘组件</button>
+          <div class="chassis-actions">
+            <button class="button secondary" id="startChassis">启动底盘组件</button>
+            <button class="button ghost-danger" id="stopChassis">停止底盘组件</button>
+          </div>
         </article>
       </aside>
     </section>
@@ -141,6 +148,6 @@
   </aside>
 
   <div class="toast" id="teleopToast" role="status" aria-live="polite"></div>
-  <script src="/assets/teleop.js?v=20260831-camera"></script>
+  <script src="/assets/teleop.js?v=20260903-safe-data"></script>
 </body>
 </html>

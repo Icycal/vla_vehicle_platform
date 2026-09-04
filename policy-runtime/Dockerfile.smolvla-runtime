@@ -1,6 +1,17 @@
 ARG BASE_IMAGE=vla-lerobot-compat:0.4.3
 FROM ${BASE_IMAGE}
 
+ARG INSTALL_TORCHAO=0
+ARG TORCHAO_VERSION=
+
+RUN if [ "${INSTALL_TORCHAO}" = "1" ]; then \
+      if [ -n "${TORCHAO_VERSION}" ]; then \
+        python3 -m pip install --no-cache-dir --no-deps "torchao==${TORCHAO_VERSION}"; \
+      else \
+        python3 -m pip install --no-cache-dir --no-deps torchao; \
+      fi; \
+    fi
+
 WORKDIR /opt/vla
 
 COPY policy-runtime/generated /opt/vla/generated

@@ -4,7 +4,7 @@ front_camera:
     framerate: 15.0
     io_method: "mmap"
     frame_id: "front_camera_optical_frame"
-    pixel_format: "mjpeg2rgb"
+    pixel_format: "yuyv2rgb"
     image_width: 640
     image_height: 480
     camera_name: "front_camera"

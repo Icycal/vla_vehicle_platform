@@ -1,6 +1,7 @@
 #include <geometry_msgs/msg/twist_stamped.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
+#include <std_msgs/msg/bool.hpp>
 #include <vehicle_interfaces/action/acquire_control_lease.hpp>
 #include <vehicle_interfaces/msg/control_lease.hpp>
 #include <vehicle_interfaces/msg/system_state.hpp>
@@ -52,6 +53,8 @@ public:
     lease_publisher_ = create_publisher<vehicle_interfaces::msg::ControlLease>(
       "/vehicle/control_lease", lease_qos);
     command_publisher_ = create_publisher<geometry_msgs::msg::TwistStamped>(output_topic_, 10);
+    override_publisher_ = create_publisher<std_msgs::msg::Bool>(
+      "/mobile_teleop/manual_obstacle_override", 10);
     command_subscription_ = create_subscription<vehicle_interfaces::msg::TeleopCommand>(
       "/vehicle/teleop_command", 20,
       std::bind(&VehicleTeleopGateway::on_command, this, std::placeholders::_1));
@@ -139,6 +142,7 @@ private:
       command_deadline_ = std::chrono::steady_clock::time_point{};
       pending_controller_id_.clear();
       deadman_ = false;
+      manual_obstacle_override_ = false;
       linear_normalized_ = 0.0;
       angular_normalized_ = 0.0;
     }
@@ -177,6 +181,7 @@ private:
       duration_seconds(message->valid_for), 0.01, command_timeout_seconds_);
     last_sequence_ = message->sequence;
     deadman_ = message->deadman;
+    manual_obstacle_override_ = message->deadman && message->manual_obstacle_override;
     linear_normalized_ = std::clamp(static_cast<double>(message->linear_normalized), -1.0, 1.0);
     angular_normalized_ = std::clamp(static_cast<double>(message->angular_normalized), -1.0, 1.0);
     command_deadline_ = std::chrono::steady_clock::now() +
@@ -210,6 +215,7 @@ private:
     output.header.frame_id = output_frame_;
     bool expired = false;
     bool lease_active = false;
+    std_msgs::msg::Bool obstacle_override;
     {
       std::lock_guard<std::mutex> lock(mutex_);
       lease_active = lease_.active;
@@ -220,8 +226,10 @@ private:
       if (command_valid) {
         output.twist.linear.x = linear_normalized_ * lease_.max_linear_velocity;
         output.twist.angular.z = angular_normalized_ * lease_.max_angular_velocity;
+        obstacle_override.data = manual_obstacle_override_;
       }
     }
+    override_publisher_->publish(obstacle_override);
     if (lease_active) {
       command_publisher_->publish(output);
     }
@@ -241,6 +249,7 @@ private:
       lease_.header.stamp = now();
       lease_.expires_at = now();
       deadman_ = false;
+      manual_obstacle_override_ = false;
       linear_normalized_ = 0.0;
       angular_normalized_ = 0.0;
       command_deadline_ = std::chrono::steady_clock::time_point{};
@@ -326,6 +335,7 @@ private:
   double linear_normalized_{0.0};
   double angular_normalized_{0.0};
   bool deadman_{false};
+  bool manual_obstacle_override_{false};
   std::string pending_controller_id_;
   std::atomic<std::uint64_t> lease_counter_{0};
   rclcpp_action::Server<AcquireLease>::SharedPtr action_server_;
@@ -334,6 +344,7 @@ private:
   rclcpp::Subscription<vehicle_interfaces::msg::TeleopCommand>::SharedPtr command_subscription_;
   rclcpp::Publisher<vehicle_interfaces::msg::ControlLease>::SharedPtr lease_publisher_;
   rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr command_publisher_;
+  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr override_publisher_;
   rclcpp::TimerBase::SharedPtr timer_;
 };
 

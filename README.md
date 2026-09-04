@@ -86,6 +86,12 @@ contains the Mock Provider and remains Shadow-only; it never starts `wheeltec_ro
 - `third_party/wheeltec_ros2`: imported Nav2, chassis, message, and serial source snapshots.
 - `scripts`: reproducible workspace preparation, build, launch, and smoke checks.
 
+Model packages use the provider-neutral `chitu.policy-model.v2` runtime descriptor. SmolVLA supports
+the existing mixed BF16/FP32 PyTorch path, portable W8A16 reference quantization, and optional
+TorchAO acceleration without changing the floating-point Policy Action contract. Hugging Face installation, vehicle-local model
+import, INT8 variant creation, compatibility checks, activation rollback, and output comparison are
+documented in `docs/MODEL_LIFECYCLE.md`.
+
 ## Phase 0 build
 
 ```bash

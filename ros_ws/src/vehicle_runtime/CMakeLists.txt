@@ -14,6 +14,7 @@ find_package(geometry_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_action REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
 find_package(vehicle_interfaces REQUIRED)
 find_package(vehicle_policy_transport REQUIRED)
 
@@ -21,7 +22,7 @@ add_executable(vehicle_supervisor src/vehicle_supervisor_node.cpp)
 ament_target_dependencies(vehicle_supervisor rclcpp vehicle_interfaces)
 
 add_executable(vehicle_teleop_gateway src/vehicle_teleop_gateway_node.cpp)
-ament_target_dependencies(vehicle_teleop_gateway geometry_msgs rclcpp rclcpp_action vehicle_interfaces)
+ament_target_dependencies(vehicle_teleop_gateway geometry_msgs rclcpp rclcpp_action std_msgs vehicle_interfaces)
 
 add_executable(vla_policy_gateway src/vla_policy_gateway_node.cpp)
 ament_target_dependencies(
@@ -37,7 +38,7 @@ add_executable(vla_control_mux src/vla_control_mux_node.cpp)
 ament_target_dependencies(vla_control_mux geometry_msgs rclcpp vehicle_interfaces)
 
 add_executable(vla_safety_guard src/vla_safety_guard_node.cpp)
-ament_target_dependencies(vla_safety_guard geometry_msgs rclcpp sensor_msgs vehicle_interfaces)
+ament_target_dependencies(vla_safety_guard geometry_msgs rclcpp sensor_msgs std_msgs vehicle_interfaces)
 
 install(TARGETS
   vehicle_supervisor

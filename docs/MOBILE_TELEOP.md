@@ -39,7 +39,10 @@ Mobile Web App
 - 页面进入后台或关闭时停止 Deadman 并尝试释放租约；
 - 释放或租约过期后 Supervisor 自动回到 `MANUAL`；
 - 速度上限同时受到页面设置、Gateway 上限和 Safety Guard 上限约束；
-- 紧急停车调用 `/vehicle/request_safe_stop`，不绕过 Supervisor。
+- 紧急停车调用 `/vehicle/request_safe_stop`，不绕过 Supervisor；
+- 普通安全模式对前方障碍执行方向性拦截：禁止继续前进，但允许受限倒车脱困；
+- 完全手动模式仅旁路激光雷达障碍物判断，急停、限速、租约、Deadman 和命令超时仍然有效；
+- 正式数据采集期间强制使用普通安全模式，不能同时启用完全手动模式。
 
 ## 4. 使用顺序
 
@@ -78,7 +81,10 @@ Episode Recorder 同时记录：
 - `/control/cmd_vel_selected`：Mux 选择的目标命令；
 - `/cmd_vel`：Safety Guard 处理后的最终执行命令；
 - `/chitu/action/target`：按当前 Mobility Plugin 编码的训练目标；
-- `/chitu/action/executed`：最终实际执行 Action，数据集导出优先使用该字段。
+- `/chitu/action/executed`：最终实际执行 Action，数据集导出优先使用该字段；
+- `safety_mode`：记录 `normal` 或 `manual_obstacle_override`；
+- `obstacle_override`：明确标记该 Action 是否旁路了障碍物判断；
+- `safety_intervened/safety_reasons`：记录安全层是否修改 Action 以及对应规则。
 
 这样既可以训练实际执行动作，也能审计 Safety Guard 是否对人工指令进行了修改。
 

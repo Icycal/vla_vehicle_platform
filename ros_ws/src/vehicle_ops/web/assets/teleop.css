@@ -195,6 +195,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, a:focus-visib
 .safety-confirm span { display: grid; gap: 3px; }
 .safety-confirm b { font-size: 13px; }
 .safety-confirm small { color: var(--muted); font-size: 10px; }
+.manual-confirm { display: flex; align-items: flex-start; gap: 12px; margin-top: 10px; padding: 13px; border: 1px solid rgba(251,146,60,.28); border-radius: 15px; background: rgba(124,45,18,.12); cursor: pointer; }
+.manual-confirm input { flex: 0 0 auto; width: 22px; height: 22px; accent-color: #f97316; }
+.manual-confirm span { display: grid; gap: 3px; }
+.manual-confirm b { color: #fdba74; font-size: 13px; }
+.manual-confirm small { color: var(--muted); font-size: 10px; line-height: 1.5; }
 .control-actions, .episode-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin-top: 12px; }
 .episode-actions { grid-template-columns: 1fr 1fr; }
 .episode-actions .ghost-danger { grid-column: 1 / -1; }
@@ -221,6 +226,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, a:focus-visib
 .setup-list div { display: flex; justify-content: space-between; gap: 12px; padding: 11px 12px; background: #0a1825; }
 .setup-list span { color: var(--muted); font-size: 11px; }
 .setup-list strong { font-size: 11px; }
+.chassis-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
 .emergency-stop { position: fixed; z-index: 25; left: 50%; bottom: calc(16px + var(--safe-bottom)); display: flex; align-items: center; justify-content: center; gap: 11px; width: min(360px, calc(100vw - 28px)); min-height: 68px; transform: translateX(-50%); border: 2px solid rgba(254,202,202,.76); border-radius: 20px; color: #fff; background: linear-gradient(135deg, #dc2626, #991b1b); box-shadow: 0 18px 50px rgba(127,29,29,.5), inset 0 1px rgba(255,255,255,.22); }
 .emergency-stop:active { transform: translateX(-50%) scale(.98); }
 .emergency-stop svg { width: 31px; fill: currentColor; }

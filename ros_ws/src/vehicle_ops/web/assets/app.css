@@ -180,7 +180,8 @@ footer{flex-direction:column;gap:6px}
 @media(prefers-reduced-motion:reduce){.camera-live-overlay.updated .camera-live-label>i{animation:none}}
 
 /* Controlled Job Center */
-.job-center-grid{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(320px,.75fr);gap:14px;align-items:start}
+.job-center-grid{display:grid;grid-template-columns:minmax(0,1.18fr) minmax(380px,.82fr);gap:14px;align-items:start}
+.job-center-column{display:flex;min-width:0;flex-direction:column;gap:14px}
 .job-launcher,.job-history,.job-console,.job-boundary{padding:20px}
 .job-intro{margin:10px 0 16px;color:var(--muted);font-size:11px;line-height:1.65}
 .job-form{display:grid;grid-template-columns:.72fr 1fr 1fr;gap:10px;align-items:end}
@@ -201,13 +202,13 @@ footer{flex-direction:column;gap:6px}
 .job-state.queued,.job-state.running{border-color:#725d2a;color:#f5ca69}.job-state.succeeded{border-color:#275b4b;color:#67d9ad}.job-state.failed{border-color:#6e3040;color:#ff9bac}.job-state.cancelled{border-color:#4b5060;color:#aab5c3}
 .job-empty{display:grid;place-items:center;min-height:160px;border:1px dashed #29445b;border-radius:11px;text-align:center;color:var(--muted)}
 .job-empty strong,.job-empty span{display:block}.job-empty strong{font-size:11px;color:var(--text)}.job-empty span{margin-top:6px;font-size:9px}
-.job-console{grid-column:1/2}
+.job-console{min-width:0}
 .job-console-actions{display:flex;align-items:center;gap:8px}
 .button.compact-button{margin:0;padding:6px 9px;font-size:9px}
 .button:disabled{cursor:not-allowed;opacity:.38;transform:none;filter:none}
 .job-console pre{height:250px;margin:14px 0 0;padding:14px;border:1px solid #1a3043;border-radius:11px;background:#030b12;color:#a9c6d8;overflow:auto;white-space:pre-wrap;word-break:break-word;font:10px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace}
-.job-boundary{grid-column:2/3;grid-row:2/3}
-@media(max-width:1050px){.job-center-grid{grid-template-columns:1fr}.job-console,.job-boundary{grid-column:auto;grid-row:auto}.job-form{grid-template-columns:1fr 1fr}.job-form label:first-child{grid-column:1/-1}}
+.job-boundary{min-width:0}
+@media(max-width:1050px){.job-center-grid{grid-template-columns:1fr}.job-center-column{display:contents}.job-launcher{order:1}.model-manager{order:2}.job-history{order:3}.job-boundary{order:4}.job-console{order:5}.job-form{grid-template-columns:1fr 1fr}.job-form label:first-child{grid-column:1/-1}}
 @media(max-width:680px){.job-launcher,.job-history,.job-console,.job-boundary{padding:16px}.job-form{grid-template-columns:1fr}.job-form label:first-child{grid-column:auto}.policy-actions{grid-template-columns:1fr}.job-console .section-heading{align-items:flex-start}.job-console-actions{align-items:flex-end;flex-direction:column}.job-console pre{height:220px}}
 @media(prefers-reduced-motion:reduce){.job-row{transition:none}}
 
@@ -379,3 +380,5 @@ footer{flex-direction:column;gap:6px}
 @media(max-width:900px){.debug-grid{grid-template-columns:1fr;grid-template-areas:"controller" "images" "actions" "stage" "json";grid-template-rows:auto}}
 
 .debug-images .debug-image-grid,.debug-image-grid figure,.debug-image-frame{min-width:0;max-width:100%}.debug-images .debug-image-frame{width:100%;min-height:0;height:auto}.debug-image-frame img{max-width:100%;max-height:100%;object-fit:contain}@media(max-width:900px){.debug-images .debug-image-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:680px){.debug-images .debug-image-grid{grid-template-columns:1fr}.debug-images .debug-image-frame{aspect-ratio:4/3}}
+
+.model-runtime-contract{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-top:5px}.model-runtime-contract span{display:grid;gap:3px;min-width:0;padding:7px 8px;border:1px solid rgba(53,215,243,.18);border-radius:8px;background:rgba(4,19,29,.68);white-space:normal;overflow-wrap:anywhere}.model-runtime-contract b{color:#70cddd;font-size:8px;font-weight:600;letter-spacing:.06em;text-transform:uppercase}.model-actions{gap:6px;flex-wrap:wrap}@media(max-width:760px){.model-runtime-contract{grid-template-columns:1fr}.model-actions{display:grid}}

@@ -1,5 +1,5 @@
-﻿const $ = (id) => document.getElementById(id);
-const state = { mobilityPlugins: [], modelCatalog: { mobility: { plugins: [], active_plugin_id: "" }, models: [] }, datasetCatalog: { episodes: [], exports: [], lerobot: [], archives: [] }, datasetFailureLogJobId: "", datasetFailureLog: "", selectedLerobotPath: "", token: sessionStorage.getItem("vehicleOpsToken") || "", cameraSequence: 0, pipelineCameraSequence: 0, cameraStatus: null, pipelineCameraActive: false, selectedJobId: "", jobs: [], debugRunId: "", debugResult: null, debugImageUrls: {}, pipelineTrace: null, pipelineHistory: [], selectedPipelineStageId: "", selectedPipelineHistoryId: "", inspectorMode: "live", components: [], componentProfiles: [], selectedComponentId: "", storage: null, storageItems: [], selectedStorageCategory: "", systemMode: "", policyStatus: null, systemStatus: null, runtimeSwitchJobId: "", runtimeSwitchTarget: "", runtimeSwitchNotified: false, debugInputSource: "camera", debugUpload: null, observationWidth: 640, observationHeight: 480 };
+const $ = (id) => document.getElementById(id);
+const state = { mobilityPlugins: [], modelCatalog: { mobility: { plugins: [], active_plugin_id: "" }, models: [] }, datasetCatalog: { episodes: [], exports: [], lerobot: [], archives: [] }, datasetFailureLogJobId: "", datasetFailureLog: "", selectedLerobotPath: "", token: sessionStorage.getItem("vehicleOpsToken") || "", cameraSequence: 0, pipelineCameraSequence: 0, cameraStatus: null, pipelineCameraActive: false, selectedJobId: "", jobs: [], debugRunId: "", debugResult: null, debugImageUrls: {}, pipelineTrace: null, pipelineHistory: [], selectedPipelineStageId: "", selectedPipelineHistoryId: "", inspectorMode: "live", components: [], componentProfiles: [], selectedComponentId: "", storage: null, storageItems: [], selectedStorageCategory: "", systemMode: "", policyStatus: null, systemStatus: null, runtimeSwitchJobId: "", runtimeSwitchTarget: "", runtimeSwitchNotified: false, debugInputSource: "camera", debugUpload: null, observationWidth: 640, observationHeight: 480, statusRequestActive: false };
 const text = (id, value) => { $(id).textContent = value ?? "—"; };
 const number = (value, digits = 1) => Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : "--";
 const milliseconds = (value) => {
@@ -121,9 +121,16 @@ function renderCameraView(camera, ids, sequenceKey, enabled = true) {
   $(ids.image).style.display = received ? "block" : "none";
   $(ids.empty).style.display = received ? "none" : "grid";
   const sequence = Number(camera?.frame_sequence || 0);
-  if (!received || sequence <= 0 || sequence === state[sequenceKey]) return;
+  const image = $(ids.image);
+  if (!received || sequence <= 0 || sequence === state[sequenceKey] || image.dataset.loading === "true") return;
   state[sequenceKey] = sequence;
-  $(ids.image).src = `/api/camera/front.jpg?t=${sequence}`;
+  image.dataset.loading = "true";
+  image.onload = () => {image.dataset.loading = "false";};
+  image.onerror = () => {
+    image.dataset.loading = "false";
+    if (state[sequenceKey] === sequence) state[sequenceKey] = 0;
+  };
+  image.src = `/api/camera/front.jpg?t=${sequence}`;
   text(ids.time, frameTime(camera.frame_received_at_ms));
   text(ids.sequence, `帧 #${sequence}`);
   $(ids.overlay).classList.remove("updated");
@@ -278,13 +285,20 @@ function render(data) {
   $("safetyState").style.color = data.safety?.active ? "var(--danger)" : "var(--lime)";
   text("lastUpdate", `最后更新 ${new Date().toLocaleTimeString()}`);
 }async function refresh() {
+  if (state.statusRequestActive) return;
+  state.statusRequestActive = true;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 4000);
   try {
-    const response = await fetch("/api/status", { cache: "no-store" });
+    const response = await fetch("/api/status", { cache: "no-store", signal: controller.signal });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     render(await response.json());
   } catch (error) {
     badge($("connectionBadge"), false, "API ONLINE", "API OFFLINE");
-    text("systemMessage", error.message);
+    text("systemMessage", error.name === "AbortError" ? "????????????" : error.message);
+  } finally {
+    clearTimeout(timeout);
+    state.statusRequestActive = false;
   }
 }
 $("episodeForm").addEventListener("submit", async (event) => {
@@ -501,7 +515,7 @@ function renderDatasetWorkflow(episodes, exports, lerobot, archives) {
   text("datasetFlowEpisodes", `${episodes.length} \u9879 ? ${episodes.length ? "\u53ef\u751f\u6210\u4e2d\u95f4\u6570\u636e" : "\u7b49\u5f85\u91c7\u96c6\u8bb0\u5f55"}${datasetJobSuffix(stageJobs.episodes)}`);
   text("datasetFlowExports", `${exports.length} \u9879 ? ${exports.length ? "\u53ef\u8f6c\u6362\u4e3a LeRobot" : "\u7b49\u5f85\u751f\u6210\u4e2d\u95f4\u6570\u636e"}${datasetJobSuffix(stageJobs.exports)}`);
   text("datasetFlowLerobot", `${lerobot.length} \u9879 ? ${lerobot.length ? "\u53ef\u751f\u6210\u8bad\u7ec3\u5305" : "\u7b49\u5f85\u8f6c\u6362"}${datasetJobSuffix(stageJobs.lerobot)}`);
-  text("datasetFlowArchive", `${archives.length} \u4e2a ? ${archives.length ? "\u5df2\u751f\u6210\uff0c\u53ef\u4e0b\u8f7d\u5230 x86" : "\u7b49\u5f85\u751f\u6210"}${datasetJobSuffix(stageJobs.archive)}`);
+  text("datasetFlowArchive", `${archives.length} \u4e2a ? ${archives.length ? "\u5df2\u751f\u6210\uff0c\u53ef\u4e0b\u8f7d" : "\u7b49\u5f85\u751f\u6210"}${datasetJobSuffix(stageJobs.archive)}`);
   Object.entries(stageJobs).forEach(([stage, job]) => {
     const node = document.querySelector(`[data-flow-stage="${stage}"]`);
     if (!node || !job) return;
@@ -536,7 +550,7 @@ function renderDatasetWorkflow(episodes, exports, lerobot, archives) {
     status.append(document.createTextNode(`\u8bad\u7ec3\u5305\u5df2\u751f\u6210\uff1a${latestArchive.name} · ${formatBytes(latestArchive.bytes)} `));
     const button = document.createElement("button");
     button.className = "button ghost compact-button";
-    button.textContent = "\u4e0b\u8f7d\u5230 x86";
+    button.textContent = "\u4e0b\u8f7d";
     button.addEventListener("click", () => downloadDatasetArchive(latestArchive.name));
     status.append(button);
     return;
@@ -666,6 +680,7 @@ function modelCard(model) {
   const manifest = model.manifest || {};
   const action = manifest.action || {};
   const compatibility = model.compatibility || {};
+  const runtime = model.runtime_compatibility || {};
   const [statusTitle, statusDescription] = modelCompatibilityText(compatibility);
   const recommended = (compatibility.recommended_plugin_ids || []).map(modelPluginName);
   const features = (action.features || []).slice().sort((left, right) => Number(left.index) - Number(right.index));
@@ -673,12 +688,20 @@ function modelCard(model) {
   const canActivate = model.activatable && !model.active && model.valid && compatibility.activation_allowed !== false;
   const blockedButton = model.activatable && !model.active && model.valid && !canActivate;
   const statusClass = compatibility.status === "compatible" ? "ready" : compatibility.status === "missing_action_descriptor" ? "warning" : "blocked";
+  const runtimeClass = runtime.activation_allowed === false ? "blocked" : runtime.status === "requires_runtime_check" ? "warning" : "ready";
   card.className = `model-item${model.active ? " active" : ""}${model.valid ? "" : " invalid"}`;
-  card.innerHTML = `<div class="model-main"><strong>${escapeHtml(model.provider)} / ${escapeHtml(model.version)}${model.active ? " · 当前" : ""}</strong><small>${escapeHtml(manifest.model_id || "本地模型")} @ ${escapeHtml(manifest.revision || "--")} · ${formatBytes(model.bytes)}</small><span>训练数据：${escapeHtml(manifest.dataset_id || "未关联")}</span><div class="model-action-contract"><span><b>Action Schema</b>${escapeHtml(compatibility.action_schema || "未声明")}</span><span><b>输出字段</b>${escapeHtml(featureText)}</span><span><b>当前插件</b>${escapeHtml(modelPluginName(compatibility.active_plugin_id))}</span><span><b>推荐插件</b>${escapeHtml(recommended.join("、") || "无")}</span></div><div class="model-compatibility ${statusClass}"><strong>${escapeHtml(statusTitle)}</strong><span>${escapeHtml(statusDescription)}</span></div></div><div class="model-actions">${canActivate ? '<button class="button secondary compact-button" data-model-activate>激活</button>' : ""}${blockedButton ? '<button class="button secondary compact-button" disabled title="模型 Action Schema 与当前插件不兼容">无法激活</button>' : ""}</div>`;
+  card.innerHTML = `<div class="model-main"><strong>${escapeHtml(model.provider)} / ${escapeHtml(model.version)}${model.active ? " · 当前" : ""}</strong><small>${escapeHtml(manifest.model_id || "本地模型")} @ ${escapeHtml(manifest.revision || "--")} · ${formatBytes(model.bytes)}</small><span>训练数据：${escapeHtml(manifest.dataset_id || "未关联")}</span><div class="model-runtime-contract"><span><b>推理后端</b>${escapeHtml(runtime.backend || "pytorch")}</span><span><b>权重精度</b>${escapeHtml(runtime.weight_precision || "mixed")}</span><span><b>激活精度</b>${escapeHtml(runtime.activation_precision || "bfloat16")}</span></div><div class="model-compatibility ${runtimeClass}"><strong>运行时兼容性</strong><span>${escapeHtml(runtime.message || "等待检查")}</span></div><div class="model-action-contract"><span><b>Action Schema</b>${escapeHtml(compatibility.action_schema || "未声明")}</span><span><b>输出字段</b>${escapeHtml(featureText)}</span><span><b>当前插件</b>${escapeHtml(modelPluginName(compatibility.active_plugin_id))}</span><span><b>推荐插件</b>${escapeHtml(recommended.join("、") || "无")}</span></div><div class="model-compatibility ${statusClass}"><strong>${escapeHtml(statusTitle)}</strong><span>${escapeHtml(statusDescription)}</span></div></div><div class="model-actions">${canActivate ? '<button class="button secondary compact-button" data-model-activate>激活</button>' : ""}${model.activatable && runtime.weight_precision !== "int8" ? '<button class="button secondary compact-button" data-model-int8>生成 INT8</button>' : ""}${blockedButton ? '<button class="button secondary compact-button" disabled title="模型与当前运行时或 Mobility Plugin 不兼容">无法激活</button>' : ""}</div>`;
   card.querySelector("[data-model-activate]")?.addEventListener("click", async () => {
     if (!confirm(`确认激活模型 ${model.version}？\n\nAction Schema：${compatibility.action_schema || "未声明"}\n当前插件：${modelPluginName(compatibility.active_plugin_id)}\n\n系统将重启 SmolVLA Runtime；失败时自动恢复上一版本。`)) return;
     try { await createJob("policy.model_activate", {provider: model.provider, version: model.version}); }
     catch (error) { toast(error.message, true); if (!state.token) openToken(); }
+  });
+  card.querySelector("[data-model-int8]")?.addEventListener("click", async () => {
+    const targetVersion = prompt("请输入 INT8 模型版本名", `${model.version}-int8`)?.trim();
+    if (!targetVersion) return;
+    try {
+      await createJob("policy.model_variant", {provider: model.provider, source_version: model.version, target_version: targetVersion, precision: "int8"});
+    } catch (error) { toast(error.message, true); if (!state.token) openToken(); }
   });
   return card;
 }
@@ -694,11 +717,20 @@ async function refreshModels(showError = false) {
 }
 $("modelInstallForm").addEventListener("submit", async (event) => {
   event.preventDefault();
-  const parameters = {provider: $("modelProvider").value, version: $("modelVersion").value.trim(), model_id: $("modelRepository").value.trim(), revision: $("modelRevision").value.trim() || "main", dataset_id: $("modelDatasetId").value.trim()};
-  if (!parameters.version || !parameters.model_id) {toast("\u8bf7\u586b\u5199\u7248\u672c\u540d\u548c\u6a21\u578b\u4ed3\u5e93", true); return;}
-  if (!confirm(`\u786e\u8ba4\u4e0b\u8f7d\u5e76\u5b89\u88c5 ${parameters.model_id}@${parameters.revision}\uff1f\n\n\u5b89\u88c5\u4e0d\u4f1a\u81ea\u52a8\u5207\u6362\u5f53\u524d\u6a21\u578b\u3002`)) return;
-  try { await createJob("policy.model_install", parameters); }
+  const localSource = $("modelSource").value === "local";
+  const sourceValue = $("modelRepository").value.trim();
+  const common = {provider: $("modelProvider").value, version: $("modelVersion").value.trim(), dataset_id: $("modelDatasetId").value.trim()};
+  if (!common.version || !sourceValue) {toast(localSource ? "请填写版本名和本地模型目录" : "请填写版本名和模型仓库", true); return;}
+  const parameters = localSource ? {...common, source_path: sourceValue} : {...common, model_id: sourceValue, revision: $("modelRevision").value.trim() || "main"};
+  if (!confirm(localSource ? `确认从车端目录导入 ${sourceValue}？\n\n导入不会自动切换当前模型。` : `确认下载并安装 ${parameters.model_id}@${parameters.revision}？\n\n安装不会自动切换当前模型。`)) return;
+  try { await createJob(localSource ? "policy.model_import" : "policy.model_install", parameters); }
   catch (error) { toast(error.message, true); if (!state.token) openToken(); }
+});
+$("modelSource").addEventListener("change", () => {
+  const localSource = $("modelSource").value === "local";
+  $("modelRepositoryLabel").firstChild.textContent = localSource ? "本地模型目录" : "模型仓库";
+  $("modelRepository").placeholder = localSource ? "/data/models/my-smolvla" : "组织/仓库";
+  $("modelRevisionLabel").hidden = localSource;
 });
 $("refreshModels").addEventListener("click", () => refreshModels(true));
 

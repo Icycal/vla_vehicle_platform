@@ -7,7 +7,7 @@
 
   <article class="panel dataset-center">
     <div class="section-heading"><div><p class="eyebrow">DATA ASSET CENTER</p><h2>Episode 与数据集管理</h2><p class="component-intro">原始记录保持模型无关；导出后可检查并转换为 LeRobot，供 SmolVLA 或其他 LeRobot 策略使用。</p></div><div class="dataset-actions"><span class="pill neutral" id="datasetApiBadge"><i></i>读取中</span><button class="button ghost compact-button" id="refreshDatasets">刷新</button></div></div>
-    <div class="dataset-workflow-board">      <div class="dataset-workflow-heading"><div><strong>训练数据转换流程</strong><small>实际操作请使用下方卡片按钮；这里展示来源、转换状态和最终产物。</small></div><span class="dataset-flow-hint">原始记录不会被修改</span></div>      <div class="dataset-workflow-stages">        <div class="dataset-stage" data-flow-stage="episodes"><div class="dataset-stage-index">01</div><div><strong>原始 Episode</strong><span id="datasetFlowEpisodes">0 项 · 等待采集记录</span></div></div>        <b class="dataset-stage-arrow">→</b>        <div class="dataset-stage" data-flow-stage="exports"><div class="dataset-stage-index">02</div><div><strong>vehicle.dataset.v1</strong><span id="datasetFlowExports">0 项 · 等待生成中间数据</span></div></div>        <b class="dataset-stage-arrow">→</b>        <div class="dataset-stage" data-flow-stage="lerobot"><div class="dataset-stage-index">03</div><div><strong>LeRobot 数据集</strong><span id="datasetFlowLerobot">0 项 · 等待转换</span></div></div>        <b class="dataset-stage-arrow">→</b>        <div class="dataset-stage" data-flow-stage="archive"><div class="dataset-stage-index">04</div><div><strong>训练包</strong><span id="datasetFlowArchive">0 个 · 可下载到 x86</span></div></div>      </div>      <div class="dataset-workflow-status" id="datasetWorkflowStatus">请从下方原始 Episode 开始生成中间数据。</div>    </div>
+    <div class="dataset-workflow-board">      <div class="dataset-workflow-heading"><div><strong>训练数据转换流程</strong><small>实际操作请使用下方卡片按钮；这里展示来源、转换状态和最终产物。</small></div><span class="dataset-flow-hint">原始记录不会被修改</span></div>      <div class="dataset-workflow-stages">        <div class="dataset-stage" data-flow-stage="episodes"><div class="dataset-stage-index">01</div><div><strong>原始 Episode</strong><span id="datasetFlowEpisodes">0 项 · 等待采集记录</span></div></div>        <b class="dataset-stage-arrow">→</b>        <div class="dataset-stage" data-flow-stage="exports"><div class="dataset-stage-index">02</div><div><strong>vehicle.dataset.v1</strong><span id="datasetFlowExports">0 项 · 等待生成中间数据</span></div></div>        <b class="dataset-stage-arrow">→</b>        <div class="dataset-stage" data-flow-stage="lerobot"><div class="dataset-stage-index">03</div><div><strong>LeRobot 数据集</strong><span id="datasetFlowLerobot">0 项 · 等待转换</span></div></div>        <b class="dataset-stage-arrow">→</b>        <div class="dataset-stage" data-flow-stage="archive"><div class="dataset-stage-index">04</div><div><strong>训练包</strong><span id="datasetFlowArchive">0 个 · 可下载</span></div></div>      </div>      <div class="dataset-workflow-status" id="datasetWorkflowStatus">请从下方原始 Episode 开始生成中间数据。</div>    </div>
     <div class="dataset-columns">
       <section><div class="dataset-column-heading"><div><strong>原始 Episode</strong><small>原始记录 → 生成中间数据</small></div><small id="episodeDatasetCount">0 项</small></div><div id="episodeDatasetList" class="dataset-list"><div class="job-empty"><strong>正在扫描</strong><span>等待数据目录接口</span></div></div></section>
       <section><div class="dataset-column-heading"><div><strong>中间数据</strong><small>vehicle.dataset.v1 → 转为 LeRobot</small></div><small id="exportDatasetCount">0 项</small></div><div id="exportDatasetList" class="dataset-list"><div class="job-empty"><strong>尚无中间数据</strong><span>可从左侧原始 Episode 生成</span></div></div></section>
@@ -164,6 +164,7 @@
 </section>
 <section class="view-panel" id="view-tools">
 <div class="job-center-grid">
+  <div class="job-center-column job-center-primary">
     <article class="panel job-launcher">
       <div class="section-heading"><div><p class="eyebrow">CONTROLLED JOBS</p><h2>受控任务中心</h2></div><span class="pill neutral" id="jobApiBadge"><i></i>需要令牌</span></div>
       <p class="job-intro">仅执行后端白名单任务。参数会经过路径沙箱校验，任务不会访问底盘控制链路。</p>
@@ -176,20 +177,6 @@
       <div class="command-preview"><small>等价命令（仅供调试）</small><pre id="generatedCommand"></pre></div>
       <div class="policy-actions"><div><strong>Policy Runtime</strong><span>模型文件与运行容器的只读检查</span></div><button class="button secondary" data-policy-job="policy.health_check">模型健康检查</button><button class="button secondary" data-policy-job="policy.runtime_test">Runtime 测试</button></div>
     </article>
-    <article class="panel model-manager">
-      <div class="section-heading"><div><p class="eyebrow">MODEL LIFECYCLE</p><h2>模型升级与版本</h2></div><button class="icon-button compact" id="refreshModels" title="刷新模型">↻</button></div>
-      <p class="job-intro">从受信任的 Hugging Face 仓库安装版本，记录训练数据集关联；激活时强制检查 Shadow、调试会话、Episode 与车辆静止状态。</p>
-      <div id="modelCompatibilitySummary" class="model-compatibility-overview neutral"><strong>正在检查动作协议</strong><span>根据模型 Action Schema 自动推荐 Mobility Plugin，不按车辆名称猜测。</span></div>
-      <form id="modelInstallForm" class="model-install-form">
-        <label>Provider<select id="modelProvider"><option value="smolvla">SmolVLA</option></select></label>
-        <label>版本名<input id="modelVersion" placeholder="例如 ackermann-v2" autocomplete="off"></label>
-        <label>模型仓库<input id="modelRepository" placeholder="组织/仓库" autocomplete="off"></label>
-        <label>Revision<input id="modelRevision" value="main" autocomplete="off"></label>
-        <label>训练数据集关联<input id="modelDatasetId" placeholder="例如 datasets/lerobot/ackermann-v2" autocomplete="off"></label>
-        <button class="button primary" type="submit">安装新版本</button>
-      </form>
-      <div id="modelList" class="model-list"><div class="job-empty"><strong>正在扫描模型</strong><span>等待模型目录接口</span></div></div>
-    </article>
     <aside class="panel job-history">
       <div class="section-heading"><div><p class="eyebrow">RECENT ACTIVITY</p><h2>最近任务</h2></div><button class="icon-button compact" id="refreshJobs" title="刷新任务">↻</button></div>
       <div id="jobList" class="job-list"><div class="job-empty"><strong>等待操作令牌</strong><span>保存令牌后显示任务历史</span></div></div>
@@ -198,7 +185,25 @@
       <div class="section-heading"><div><p class="eyebrow">JOB OUTPUT</p><h2 id="selectedJobTitle">任务日志</h2></div><div class="job-console-actions"><span class="job-state neutral" id="selectedJobState">未选择</span><button class="button danger compact-button" id="cancelJob" disabled>取消任务</button></div></div>
       <pre id="jobLog">从右侧任务列表选择一项查看日志。日志最多显示最近 128 KiB。</pre>
     </article>
+  </div>
+  <div class="job-center-column job-center-secondary">
+    <article class="panel model-manager">
+      <div class="section-heading"><div><p class="eyebrow">MODEL LIFECYCLE</p><h2>模型升级与版本</h2></div><button class="icon-button compact" id="refreshModels" title="刷新模型">↻</button></div>
+      <p class="job-intro">从受信任的 Hugging Face 仓库安装版本，记录训练数据集关联；激活时强制检查 Shadow、调试会话、Episode 与车辆静止状态。</p>
+      <div id="modelCompatibilitySummary" class="model-compatibility-overview neutral"><strong>正在检查动作协议</strong><span>根据模型 Action Schema 自动推荐 Mobility Plugin，不按车辆名称猜测。</span></div>
+      <form id="modelInstallForm" class="model-install-form">
+        <label>Provider<select id="modelProvider"><option value="smolvla">SmolVLA</option></select></label>
+        <label>模型来源<select id="modelSource"><option value="remote">Hugging Face</option><option value="local">车端本地目录</option></select></label>
+        <label>版本名<input id="modelVersion" placeholder="例如 ackermann-v2" autocomplete="off"></label>
+        <label id="modelRepositoryLabel">模型仓库<input id="modelRepository" placeholder="组织/仓库" autocomplete="off"></label>
+        <label id="modelRevisionLabel">Revision<input id="modelRevision" value="main" autocomplete="off"></label>
+        <label>训练数据集关联<input id="modelDatasetId" placeholder="例如 datasets/lerobot/ackermann-v2" autocomplete="off"></label>
+        <button class="button primary" type="submit">安装新版本</button>
+      </form>
+      <div id="modelList" class="model-list"><div class="job-empty"><strong>正在扫描模型</strong><span>等待模型目录接口</span></div></div>
+    </article>
     <aside class="panel tools-help job-boundary"><p class="eyebrow">SAFETY BOUNDARY</p><h2>执行边界</h2><ul><li>只允许五类固定 Job Type</li><li>输入与输出限制在 <code>datasets/</code>、<code>run/test/</code></li><li>使用 <code>fork/exec</code>，不拼接 Shell 命令</li><li>默认同时只运行一个重型任务</li><li>不发布 <code>/cmd_vel</code>，不访问 STM32</li></ul><div class="api-state"><small>Job Storage</small><strong>run/ops/jobs/&lt;job-id&gt;</strong><span>状态、请求参数和执行日志持久化</span></div></aside>
+  </div>
   </div>
 </section>
 </main><aside class="token-panel" id="tokenPanel"><button class="panel-close" id="tokenClose">×</button><p class="eyebrow">OPERATOR ACCESS</p><h2>操作令牌</h2><p>令牌只保存在当前浏览器会话，不写入 URL 或 Git。</p><label>Token<input id="tokenInput" type="password" autocomplete="off" placeholder="输入启动终端显示的令牌"></label><button class="button primary" id="saveToken">保存到当前会话</button><small>只读车辆状态无需令牌；Episode、任务、Safe Stop 和受控 Job API 需要令牌。</small></aside><div class="panel-backdrop" id="panelBackdrop"></div><div class="toast" id="toast"></div><footer><span>赤兔 · Vehicle Intelligence Platform · Phase 2 Data Loop</span><span id="lastUpdate">等待首次更新</span></footer><script src="/assets/app.js"></script></body></html>

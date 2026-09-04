@@ -3,6 +3,9 @@ vehicle_ops_api:
     bind_address: 0.0.0.0
     port: 8088
     request_limit_bytes: 1048576
+    http_worker_count: 8
+    http_queue_limit: 32
+    http_socket_timeout_seconds: 3.0
     service_timeout_seconds: 2.0
     stale_after_seconds: 3.0
     debug_timeout_seconds: 45.0

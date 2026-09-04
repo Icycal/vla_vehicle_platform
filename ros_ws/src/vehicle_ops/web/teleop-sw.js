@@ -1,8 +1,8 @@
-const CACHE = "chitu-teleop-v7";
+const CACHE = "chitu-teleop-v9";
 const APP_SHELL = [
   "/teleop",
-  "/assets/teleop.css?v=20260831-camera",
-  "/assets/teleop.js?v=20260831-camera",
+  "/assets/teleop.css?v=20260903-safe-data",
+  "/assets/teleop.js?v=20260903-safe-data",
   "/assets/chitu-mark.svg",
   "/assets/favicon.svg",
   "/manifest.webmanifest"

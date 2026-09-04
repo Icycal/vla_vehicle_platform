@@ -1,6 +1,8 @@
 # SmolVLA Model Lifecycle
 
-Chitu provides a controlled model lifecycle for Shadow evaluation. The browser does not upload model archives through the ROS API because model artifacts are commonly larger than 1 GB. Instead, the device downloads a selected Hugging Face repository and revision through a whitelisted background Job.
+Chitu provides a controlled model lifecycle for Shadow evaluation. Models may be downloaded from a
+trusted Hugging Face repository or imported from a directory already available on the vehicle. The
+browser does not proxy multi-gigabyte model payloads through the ROS API.
 
 ## Install
 
@@ -10,6 +12,10 @@ Open **Engineering Tools → Model Upgrade and Versions** and provide:
 - a Hugging Face repository id, such as `organization/model-name`;
 - an immutable revision or commit hash when possible;
 - the LeRobot dataset path or dataset version used for training.
+
+For a locally trained model, select **Vehicle local directory** and enter an absolute path or a path
+relative to the project root. The import Job copies or hard-links the model into the managed model
+registry; it never activates the imported model automatically.
 
 The install Job writes the model to `run/models/providers/smolvla/<version>`, verifies the required SmolVLA files, and creates `vehicle_model_manifest.json`. Installation does not change the running Runtime.
 
@@ -56,5 +62,90 @@ policy_preprocessor.json
 policy_postprocessor.json
 ```
 
-Add a `vehicle_model_manifest.json` following schema `vehicle.policy-model.v1`; the model then appears in the web catalog and can be activated safely.
+The import flow creates or upgrades `vehicle_model_manifest.json` to
+`chitu.policy-model.v2`; the model then appears in the web catalog and can be activated safely.
 The model API is provider-neutral. `smolvla` is the first registered provider adapter; future providers implement the same install, manifest, validation, activation, and rollback contract without changing the platform core.
+
+## Runtime Backend and Precision
+
+Model identity, execution backend, numerical precision, hardware compatibility, and Action Schema
+are separate contracts. A representative runtime descriptor is:
+
+```json
+{
+  "schema_version": "chitu.policy-model.v2",
+  "provider": "smolvla",
+  "inference": {
+    "backend": "pytorch",
+    "artifact_format": "safetensors",
+    "weight_precision": "int8",
+    "activation_precision": "bfloat16",
+    "quantization": {
+      "engine": "pytorch-native",
+      "scheme": "weight_only",
+      "include_modules": ["model.vlm_with_expert.vlm"]
+    }
+  },
+  "compatibility": {
+    "platforms": ["linux"],
+    "architectures": [],
+    "accelerators": []
+  }
+}
+```
+
+An empty platform, architecture, or accelerator list means that the model package does not impose
+that restriction. Backend activation still checks required runtime libraries and accelerator
+support. The standard vehicle-side INT8 variant command explicitly targets Linux without fixing a
+CPU architecture, username, installation directory, or NVIDIA GPU model.
+Legacy manifests remain valid and default to the existing PyTorch mixed BF16/FP32 path.
+
+### Prepare an INT8 Variant
+
+The web model card offers **Generate INT8**. The equivalent command is:
+
+```bash
+./scripts/prepare_policy_model_variant.sh \
+  smolvla corridor-v2 corridor-v2-int8 int8
+```
+
+The first INT8 implementation is W8A16 runtime quantization. The built-in `pytorch-native` reference
+engine converts selected VLM Linear weights to per-output-channel INT8 after the trained checkpoint
+is loaded, while activations remain BF16 and the Flow-Matching expert, state projection, Action
+projection, postprocessor, Policy Action protocol, Mobility Adapter, and chassis command remain
+floating point. Quantization therefore does not alter the model's Action Schema. The reference
+engine prioritizes portability and correctness; it dequantizes each selected weight for the Linear
+operation, so lower resident parameter storage does not guarantee lower latency.
+
+TorchAO remains an optional acceleration engine for platform/PyTorch combinations that support it.
+Set `inference.quantization.engine` to `torchao` only after validating that runtime combination.
+
+Build an INT8-capable runtime image without replacing the NVIDIA PyTorch packages:
+
+```bash
+SMOLVLA_INSTALL_TORCHAO=1 \
+SMOLVLA_TORCHAO_VERSION=<validated-version> \
+./scripts/build_smolvla_runtime.sh
+```
+
+Activation of a TorchAO INT8 variant checks that TorchAO imports successfully in the selected
+runtime image. A missing or incompatible dependency rejects activation before the active model
+configuration changes. The current Jetson NVIDIA PyTorch image omits distributed components that
+recent TorchAO releases import, so vehicle-generated variants default to `pytorch-native` rather
+than silently selecting an incompatible accelerator library.
+
+### Compare Floating and Quantized Outputs
+
+Save the `actions` arrays from equivalent BF16 and INT8 single-step debug runs and compare them:
+
+```bash
+python3 tools/model/compare_action_outputs.py \
+  --baseline run/test/bf16-actions.json \
+  --candidate run/test/int8-actions.json \
+  --max-mae 0.02 \
+  --max-error 0.08
+```
+
+The report includes MAE, RMSE, maximum absolute error, per-dimension MAE, and sign changes. Passing
+this offline comparison does not replace Replay, Shadow, low-speed supervised vehicle testing, or
+Safety Guard acceptance.

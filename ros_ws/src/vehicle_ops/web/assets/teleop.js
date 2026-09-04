@@ -18,9 +18,12 @@ const state = {
   commandPending: false,
   acquiring: false,
   components: [],
+  episodeRecording: false,
   statusOnline: false,
   toastTimer: null,
   cameraSequence: 0,
+  cameraRequestActive: false,
+  cameraTimer: null,
   cameraMode: localStorage.getItem("chituTeleopCameraMode") === "floating" ? "floating" : "fixed",
   cameraPosition: null,
   cameraDrag: null
@@ -225,6 +228,7 @@ async function sendCommand(deadman = state.deadman, keepalive = false) {
     controller_id: state.controllerId,
     sequence: ++state.sequence,
     deadman,
+    manual_obstacle_override: deadman && $("manualObstacleOverride").checked,
     linear: deadman ? state.linear : 0,
     angular: deadman ? state.angular : 0,
     valid_for_ms: 250
@@ -270,6 +274,7 @@ function renderLease() {
   setText("leaseState", own ? "本机已接管" : activeOther ? "其他终端占用" : "未接管");
   setText("deadmanHint", own ? "按住摇杆车辆才会运动；松手 300ms 内自动归零" : "申请控制权后才能使用摇杆");
   if (!own) {
+    $("manualObstacleOverride").checked = false;
     $("leaseCountdown").classList.remove("active");
     setText("leaseCountdown", activeOther ? "占用" : "--");
   }
@@ -282,14 +287,24 @@ function renderStatus(payload) {
   setText("modeReadout", modeName);
   setText("executedLinear", Number(payload.executed_command?.linear_x || 0).toFixed(2));
   setText("executedAngular", Number(payload.executed_command?.angular_z || 0).toFixed(2));
+  const measured = payload.measured_motion || {};
+  setText("measuredMotion", measured.available ?
+    `${Number(measured.linear_x || 0).toFixed(2)} m/s · ${Number(measured.angular_z || 0).toFixed(2)} rad/s` : "--");
   const episode = payload.episode || {};
   const recording = episode.state_name === "RECORDING";
+  state.episodeRecording = recording;
+  if (recording && $("manualObstacleOverride").checked) {
+    $("manualObstacleOverride").checked = false;
+    if (state.deadman) sendCommand(true);
+    toast("数据采集期间已自动恢复普通安全模式", true);
+  }
+  $("manualObstacleOverride").disabled = recording;
   setText("episodeState", recording ? "记录中" : "未记录");
   $("recordLight").classList.toggle("active", recording);
   setText("episodeElapsed", `${Number(episode.elapsed_seconds || 0).toFixed(1)} s`);
   setText("episodeImages", String(episode.image_count || 0));
   setText("episodeMessages", String(episode.message_count || 0));
-  $("startEpisode").disabled = recording;
+  $("startEpisode").disabled = recording || $("manualObstacleOverride").checked;
   $("finishEpisode").disabled = !recording;
   $("discardEpisode").disabled = !recording;
   if (recording && episode.task && !$("episodeTask").value) $("episodeTask").value = episode.task;
@@ -325,7 +340,7 @@ async function refreshComponents() {
     setText("observationState", label(component("observation_pipeline")));
     setText("cameraState", label(component("front_camera")));
     $("startChassis").disabled = !chassis?.can_start;
-    $("startChassis").textContent = chassis?.state === "running" ? "底盘组件运行中" : "启动底盘组件";
+    $("stopChassis").disabled = !chassis?.can_stop;
   } catch (_) {}
 }
 
@@ -383,6 +398,10 @@ function stopJoystick(send = true) {
 
 async function startEpisode() {
   if (tokenRequired()) return;
+  if ($("manualObstacleOverride").checked) {
+    toast("正式数据采集必须使用普通安全模式，请先关闭完全手动模式", true);
+    return;
+  }
   const task = $("episodeTask").value.trim();
   const operator = $("operatorId").value.trim() || "mobile_operator";
   if (!task) {toast("请先填写任务描述", true); return;}
@@ -416,6 +435,47 @@ async function startChassis() {
     toast(result.message || "底盘启动请求已发送");
     setTimeout(refreshComponents, 1600);
   } catch (error) {toast(error.message, true);}
+}
+async function stopChassis() {
+  if (tokenRequired()) return;
+  if (!confirm("确认停止车辆底盘？停止前将释放遥控权并发送零速度命令。")) return;
+  stopJoystick(false);
+  if (hasOwnLease()) await releaseLease(false);
+  try {
+    const result = await api("/api/components/control", {
+      method: "POST",
+      body: JSON.stringify({component_id: "vehicle_chassis", action: "stop", force: true})
+    });
+    toast(result.message || "底盘停止请求已发送");
+    setTimeout(refreshComponents, 1200);
+  } catch (error) {toast(error.message, true);}
+}
+function toggleManualObstacleOverride(event) {
+  if (!event.target.checked) {
+    $("startEpisode").disabled = state.episodeRecording;
+    if (state.deadman) sendCommand(true);
+    toast("已恢复障碍物安全判断");
+    return;
+  }
+  if (state.episodeRecording) {
+    event.target.checked = false;
+    toast("数据采集期间不能启用完全手动模式", true);
+    return;
+  }
+  if (!hasOwnLease()) {
+    event.target.checked = false;
+    toast("请先申请车辆控制权", true);
+    return;
+  }
+  if (!$("safetyConfirmed").checked || !confirm(
+    "完全手动模式将旁路激光雷达障碍物判断。\n\n操作员必须持续观察相机和车辆周围环境，并对碰撞风险负责。是否继续？"))
+  {
+    event.target.checked = false;
+    return;
+  }
+  $("startEpisode").disabled = true;
+  toast("完全手动模式已启用：障碍物判断已旁路", true);
+  if (state.deadman) sendCommand(true);
 }
 async function emergencyStop() {
   if (tokenRequired()) return;
@@ -460,6 +520,8 @@ $("startEpisode").addEventListener("click", startEpisode);
 $("finishEpisode").addEventListener("click", () => stopEpisode(true));
 $("discardEpisode").addEventListener("click", () => {if (confirm("确认丢弃本次 Episode？")) stopEpisode(false);});
 $("startChassis").addEventListener("click", startChassis);
+$("stopChassis").addEventListener("click", stopChassis);
+$("manualObstacleOverride").addEventListener("change", toggleManualObstacleOverride);
 $("emergencyStop").addEventListener("click", emergencyStop);
 
 document.addEventListener("visibilitychange", () => {
@@ -482,18 +544,31 @@ window.addEventListener("pagehide", () => {
 setInterval(() => {if (state.deadman && hasOwnLease()) sendCommand(true);}, 100);
 setInterval(refreshStatus, 700);
 setInterval(refreshComponents, 2500);
-setInterval(() => {
-  const image = $("teleopCamera");
-  image.src = `/api/camera/front.jpg?frame=${Date.now()}`;
-}, 350);
+function scheduleCameraFrame(delay = 500) {
+  clearTimeout(state.cameraTimer);
+  if (document.hidden) return;
+  state.cameraTimer = setTimeout(requestCameraFrame, delay);
+}
+function requestCameraFrame() {
+  if (document.hidden || state.cameraRequestActive) return;
+  state.cameraRequestActive = true;
+  $("teleopCamera").src = `/api/camera/front.jpg?frame=${Date.now()}`;
+}
 $("teleopCamera").addEventListener("load", () => {
+  state.cameraRequestActive = false;
   $("teleopCamera").classList.add("ready");
   $("cameraPlaceholder").hidden = true;
   setText("cameraTime", new Date().toLocaleTimeString("zh-CN", {hour12: false}));
+  scheduleCameraFrame(500);
 });
 $("teleopCamera").addEventListener("error", () => {
+  state.cameraRequestActive = false;
   $("teleopCamera").classList.remove("ready");
   $("cameraPlaceholder").hidden = false;
+  scheduleCameraFrame(1200);
+});
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) scheduleCameraFrame(0);
 });
 
 updateLimitLabels();
@@ -502,5 +577,6 @@ state.cameraPosition = readCameraPosition();
 setCameraMode(state.cameraMode);
 refreshStatus();
 refreshComponents();
+scheduleCameraFrame(0);
 if (!state.token) setTimeout(openSettings, 350);
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/teleop-sw.js").catch(() => {});
