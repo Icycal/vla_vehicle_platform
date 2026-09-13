@@ -6,6 +6,7 @@
 #include <rclcpp_action/rclcpp_action.hpp>
 #include <geometry_msgs/msg/twist.hpp>
 #include <nav_msgs/msg/odometry.hpp>
+#include <sensor_msgs/msg/camera_info.hpp>
 #include <sensor_msgs/msg/compressed_image.hpp>
 #include <sensor_msgs/msg/image.hpp>
 #include <std_msgs/msg/string.hpp>
@@ -34,6 +35,7 @@
 #include <vehicle_interfaces/srv/list_storage_items.hpp>
 #include <vehicle_interfaces/srv/cleanup_storage.hpp>
 #include <nlohmann/json.hpp>
+#include "camera_calibration_manager.hpp"
 #include "job_manager.hpp"
 #include <algorithm>
 #include <atomic>
@@ -487,6 +489,13 @@ private:
   std::optional<HttpResponse> authorize(const HttpRequest & request) const;
   HttpResponse static_file(const std::string & path) const;
   HttpResponse camera();
+  HttpResponse camera_calibration_status();
+  HttpResponse camera_calibration_start(const std::string & body);
+  HttpResponse camera_calibration_capture();
+  HttpResponse camera_calibration_compute();
+  HttpResponse camera_calibration_apply(const std::string & body);
+  HttpResponse camera_calibration_reset();
+  HttpResponse camera_calibration_image(bool undistorted);
   HttpResponse pipeline_live();
   HttpResponse pipeline_history();
   HttpResponse active_debug_create(const std::string & body);
@@ -528,11 +537,14 @@ private:
   static HttpResponse success(const std::string & message, const std::string & extra = "");
   static HttpResponse error(int status, const std::string & message);
   std::string bind_, token_, web_root_, project_root_, jobs_root_;
+  std::string camera_calibration_path_, camera_calibration_metadata_path_;
+  std::string camera_component_id_{"front_camera"};
   int port_{8088}, limit_{1048576}, http_worker_count_{8}, http_queue_limit_{32};
   double http_socket_timeout_seconds_{3.0};
   double service_seconds_{2.0}, stale_seconds_{3.0}, debug_timeout_seconds_{45.0};
   double camera_dark_mean_threshold_{2.0}, command_timeout_seconds_{0.5};
   double odometry_timeout_seconds_{0.5};
+  double camera_calibration_verify_timeout_seconds_{8.0};
   double stationary_linear_threshold_{0.02}, stationary_angular_threshold_{0.05};
   std::atomic<bool> running_{false};
   int server_{-1};
@@ -542,6 +554,7 @@ private:
   std::condition_variable client_queue_condition_;
   std::deque<int> client_queue_;
   std::unique_ptr<vehicle_ops::JobManager> jobs_;
+  std::unique_ptr<vehicle_ops::CameraCalibrationManager> camera_calibration_;
   std::mutex mutex_;
   Timed<vehicle_interfaces::msg::SystemState> system_;
   Timed<vehicle_interfaces::msg::ObservationStatus> observation_;
@@ -592,6 +605,7 @@ private:
   rclcpp::Subscription<vehicle_interfaces::msg::SafetyEvent>::SharedPtr safety_sub_;
   rclcpp::Subscription<vehicle_interfaces::msg::PipelineTrace>::SharedPtr pipeline_sub_;
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr raw_camera_sub_;
+  rclcpp::Subscription<sensor_msgs::msg::CameraInfo>::SharedPtr camera_info_sub_;
   rclcpp::Subscription<sensor_msgs::msg::CompressedImage>::SharedPtr camera_sub_;
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr command_sub_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odometry_sub_;
@@ -634,6 +648,12 @@ VehicleOpsApi::VehicleOpsApi() : Node("vehicle_ops_api")
   web_root_ = declare_parameter<std::string>("web_root", "");
   project_root_ = declare_parameter<std::string>("project_root", "");
   jobs_root_ = declare_parameter<std::string>("jobs_root", "");
+  camera_calibration_path_ = declare_parameter<std::string>("camera_calibration_path", "");
+  camera_calibration_metadata_path_ =
+    declare_parameter<std::string>("camera_calibration_metadata_path", "");
+  camera_component_id_ = declare_parameter<std::string>("camera_component_id", "front_camera");
+  camera_calibration_verify_timeout_seconds_ =
+    declare_parameter<double>("camera_calibration_verify_timeout_seconds", 8.0);
   if (port_ < 1 || port_ > 65535 || !std::filesystem::is_directory(web_root_) ||
     project_root_.empty() || jobs_root_.empty())
   {
@@ -642,6 +662,21 @@ VehicleOpsApi::VehicleOpsApi() : Node("vehicle_ops_api")
   http_worker_count_ = std::clamp(http_worker_count_, 1, 32);
   http_queue_limit_ = std::clamp(http_queue_limit_, http_worker_count_, 256);
   http_socket_timeout_seconds_ = std::clamp(http_socket_timeout_seconds_, 0.5, 30.0);
+  camera_calibration_verify_timeout_seconds_ =
+    std::clamp(camera_calibration_verify_timeout_seconds_, 1.0, 30.0);
+  if (camera_calibration_path_.empty()) {
+    camera_calibration_path_ = (
+      std::filesystem::path(project_root_) /
+      "ros_ws/src/vehicle_bringup/config/front_camera_info.yaml").string();
+  }
+  if (camera_calibration_metadata_path_.empty()) {
+    camera_calibration_metadata_path_ = (
+      std::filesystem::path(project_root_) /
+      "ros_ws/src/vehicle_bringup/config/front_camera_info.meta.json").string();
+  }
+  camera_calibration_ = std::make_unique<vehicle_ops::CameraCalibrationManager>(
+    vehicle_ops::CameraCalibrationManager::Paths{
+      camera_calibration_path_, camera_calibration_metadata_path_});
   const auto state_qos = rclcpp::QoS(1).reliable().transient_local();
   system_sub_ = create_subscription<vehicle_interfaces::msg::SystemState>(
     "/vehicle/system_state", state_qos, [this](vehicle_interfaces::msg::SystemState::SharedPtr message) {update(system_, *message);});
@@ -670,6 +705,7 @@ VehicleOpsApi::VehicleOpsApi() : Node("vehicle_ops_api")
     });
   raw_camera_sub_ = create_subscription<sensor_msgs::msg::Image>(
     "/camera/image_raw", rclcpp::SensorDataQoS(), [this](sensor_msgs::msg::Image::SharedPtr message) {
+      camera_calibration_->update_frame(*message);
       const bool analyzable = message->encoding == "rgb8" || message->encoding == "bgr8" ||
         message->encoding == "rgba8" || message->encoding == "bgra8" || message->encoding == "mono8";
       if (!analyzable || message->data.empty()) {
@@ -697,6 +733,11 @@ VehicleOpsApi::VehicleOpsApi() : Node("vehicle_ops_api")
       camera_mean_intensity_ = mean;
       camera_max_intensity_ = maximum;
       camera_content_valid_ = mean >= camera_dark_mean_threshold_;
+    });
+  camera_info_sub_ = create_subscription<sensor_msgs::msg::CameraInfo>(
+    "/camera/camera_info", rclcpp::SensorDataQoS(),
+    [this](sensor_msgs::msg::CameraInfo::SharedPtr message) {
+      camera_calibration_->update_camera_info(*message);
     });
   camera_sub_ = create_subscription<sensor_msgs::msg::CompressedImage>(
     "/camera/image_compressed", rclcpp::SensorDataQoS(), [this](sensor_msgs::msg::CompressedImage::SharedPtr message) {
@@ -939,6 +980,35 @@ HttpResponse VehicleOpsApi::route(const HttpRequest & request)
     return {200, "application/json; charset=utf-8", status_json(), {{"Cache-Control", "no-store"}}};
   }
   if (request.method == "GET" && path == "/api/camera/front.jpg") {return camera();}
+  if (request.method == "GET" && path == "/api/camera-calibration/status") {
+    return camera_calibration_status();
+  }
+  if (request.method == "GET" && path == "/api/camera-calibration/preview.jpg") {
+    return camera_calibration_image(false);
+  }
+  if (request.method == "GET" && path == "/api/camera-calibration/undistorted.jpg") {
+    return camera_calibration_image(true);
+  }
+  if (path.rfind("/api/camera-calibration/", 0) == 0) {
+    const auto denied = authorize(request);
+    if (denied) {return *denied;}
+    if (request.method == "POST" && path == "/api/camera-calibration/start") {
+      return camera_calibration_start(request.body);
+    }
+    if (request.method == "POST" && path == "/api/camera-calibration/capture") {
+      return camera_calibration_capture();
+    }
+    if (request.method == "POST" && path == "/api/camera-calibration/compute") {
+      return camera_calibration_compute();
+    }
+    if (request.method == "POST" && path == "/api/camera-calibration/apply") {
+      return camera_calibration_apply(request.body);
+    }
+    if (request.method == "POST" && path == "/api/camera-calibration/reset") {
+      return camera_calibration_reset();
+    }
+    return error(405, "Unsupported camera calibration endpoint");
+  }
   if (request.method == "GET" && path == "/api/pipeline/live") {return pipeline_live();}
   if (request.method == "GET" && path == "/api/teleop/status") {return teleop_status();}
   if (path.rfind("/api/teleop/", 0) == 0) {
@@ -1082,6 +1152,116 @@ HttpResponse VehicleOpsApi::static_file(const std::string & path) const
     }
     return response;
   } catch (const std::exception &) {return error(404, "Resource not found");}
+}
+HttpResponse VehicleOpsApi::camera_calibration_status()
+{
+  return {
+    200, "application/json; charset=utf-8", camera_calibration_->status().dump() + "\n",
+    {{"Cache-Control", "no-store"}}};
+}
+
+HttpResponse VehicleOpsApi::camera_calibration_start(const std::string & body)
+{
+  try {
+    const auto input = nlohmann::json::parse(body);
+    const auto result = camera_calibration_->start(input);
+    return success(result.value("message", "Calibration session started"),
+      "\"calibration\":" + result.dump());
+  } catch (const nlohmann::json::exception &) {
+    return error(400, "Request body must be valid JSON");
+  } catch (const std::invalid_argument & exception) {
+    return error(400, exception.what());
+  } catch (const std::exception & exception) {
+    return error(409, exception.what());
+  }
+}
+
+HttpResponse VehicleOpsApi::camera_calibration_capture()
+{
+  try {
+    const auto result = camera_calibration_->capture();
+    return success(result.value("message", "Calibration sample captured"),
+      "\"calibration\":" + result.dump());
+  } catch (const std::exception & exception) {
+    return error(409, exception.what());
+  }
+}
+
+HttpResponse VehicleOpsApi::camera_calibration_compute()
+{
+  try {
+    const auto result = camera_calibration_->compute();
+    return success(result.value("message", "Calibration computed"),
+      "\"calibration\":" + result.dump());
+  } catch (const std::exception & exception) {
+    return error(409, exception.what());
+  }
+}
+
+HttpResponse VehicleOpsApi::camera_calibration_apply(const std::string & body)
+{
+  nlohmann::json input;
+  try {
+    input = nlohmann::json::parse(body);
+  } catch (const nlohmann::json::exception &) {
+    return error(400, "Request body must be valid JSON");
+  }
+  nlohmann::json result;
+  try {
+    result = camera_calibration_->apply(input);
+  } catch (const std::invalid_argument & exception) {
+    return error(400, exception.what());
+  } catch (const std::exception & exception) {
+    return error(409, exception.what());
+  }
+
+  nlohmann::json restart{{"requested", true}, {"accepted", false}};
+  if (!component_control_client_->wait_for_service(500ms)) {
+    restart["message"] = "Operation Orchestrator is unavailable";
+  } else {
+    auto request = std::make_shared<vehicle_interfaces::srv::ControlComponent::Request>();
+    request->component_id = camera_component_id_;
+    request->action = "restart";
+    request->force = false;
+    auto future = component_control_client_->async_send_request(request);
+    if (future.wait_for(std::chrono::milliseconds(
+        static_cast<int>(service_seconds_ * 4000))) != std::future_status::ready)
+    {
+      restart["message"] = "Camera restart timed out";
+    } else {
+      const auto response = future.get();
+      restart["accepted"] = response->accepted;
+      restart["message"] = response->message;
+    }
+  }
+  const bool verified = restart.value("accepted", false) &&
+    camera_calibration_->wait_for_verification(std::chrono::milliseconds(
+      static_cast<int>(camera_calibration_verify_timeout_seconds_ * 1000.0)));
+  result["restart"] = restart;
+  result["verified"] = verified;
+  const std::string message = verified ?
+    "标定已保存、相机已重启，CameraInfo 验证通过" :
+    "标定文件已保存，但相机重启或 CameraInfo 验证未通过";
+  return success(message, "\"calibration\":" + result.dump());
+}
+
+HttpResponse VehicleOpsApi::camera_calibration_reset()
+{
+  const auto result = camera_calibration_->reset();
+  return success(result.value("message", "Calibration session reset"),
+    "\"calibration\":" + result.dump());
+}
+
+HttpResponse VehicleOpsApi::camera_calibration_image(bool undistorted)
+{
+  const auto data = undistorted ? camera_calibration_->undistorted_jpeg() :
+    camera_calibration_->preview_jpeg();
+  if (data.empty()) {
+    return error(404, undistorted ? "Undistorted preview is not ready" : "Camera frame is unavailable");
+  }
+  return {
+    200, "image/jpeg", std::string(data.begin(), data.end()),
+    {{"Cache-Control", "no-store"}}};
 }
 HttpResponse VehicleOpsApi::camera()
 {

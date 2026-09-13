@@ -18,8 +18,12 @@ find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(vehicle_interfaces REQUIRED)
 find_package(nlohmann_json REQUIRED)
+find_package(OpenCV REQUIRED COMPONENTS core imgproc calib3d imgcodecs)
 
-add_executable(vehicle_ops_api src/vehicle_ops_api_node.cpp src/job_manager.cpp)
+add_executable(vehicle_ops_api
+  src/vehicle_ops_api_node.cpp
+  src/camera_calibration_manager.cpp
+  src/job_manager.cpp)
 ament_target_dependencies(
   vehicle_ops_api
   geometry_msgs
@@ -30,7 +34,8 @@ ament_target_dependencies(
   std_msgs
   vehicle_interfaces
 )
-target_link_libraries(vehicle_ops_api nlohmann_json::nlohmann_json)
+target_include_directories(vehicle_ops_api PRIVATE ${OpenCV_INCLUDE_DIRS})
+target_link_libraries(vehicle_ops_api nlohmann_json::nlohmann_json ${OpenCV_LIBS})
 
 install(TARGETS vehicle_ops_api DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY config launch web DESTINATION share/${PROJECT_NAME})

@@ -16,3 +16,7 @@ vehicle_ops_api:
     operator_token: ""
     project_root: ""
     jobs_root: ""
+    camera_calibration_path: ""
+    camera_calibration_metadata_path: ""
+    camera_component_id: "front_camera"
+    camera_calibration_verify_timeout_seconds: 8.0

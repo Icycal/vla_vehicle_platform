@@ -6,6 +6,8 @@
   <arg name="state_root" default=""/>
   <arg name="log_root" default=""/>
   <arg name="jobs_root" default=""/>
+  <arg name="camera_calibration_path" default=""/>
+  <arg name="camera_calibration_metadata_path" default=""/>
 
   <node pkg="vehicle_operation" exec="operation_orchestrator" name="operation_orchestrator" output="screen">
     <param from="$(find-pkg-share vehicle_operation)/config/components.yaml"/>
@@ -24,6 +26,8 @@
     <param name="operator_token" value="$(var operator_token)"/>
     <param name="project_root" value="$(var project_root)"/>
     <param name="jobs_root" value="$(var jobs_root)"/>
+    <param name="camera_calibration_path" value="$(var camera_calibration_path)"/>
+    <param name="camera_calibration_metadata_path" value="$(var camera_calibration_metadata_path)"/>
     <param name="web_root" value="$(find-pkg-share vehicle_ops)/web"/>
   </node>
 </launch>

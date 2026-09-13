@@ -1,5 +1,5 @@
 const $ = (id) => document.getElementById(id);
-const state = { mobilityPlugins: [], modelCatalog: { mobility: { plugins: [], active_plugin_id: "" }, models: [] }, datasetCatalog: { episodes: [], exports: [], lerobot: [], archives: [] }, datasetFailureLogJobId: "", datasetFailureLog: "", selectedLerobotPath: "", token: sessionStorage.getItem("vehicleOpsToken") || "", cameraSequence: 0, pipelineCameraSequence: 0, cameraStatus: null, pipelineCameraActive: false, selectedJobId: "", jobs: [], debugRunId: "", debugResult: null, debugImageUrls: {}, pipelineTrace: null, pipelineHistory: [], selectedPipelineStageId: "", selectedPipelineHistoryId: "", inspectorMode: "live", components: [], componentProfiles: [], selectedComponentId: "", storage: null, storageItems: [], selectedStorageCategory: "", systemMode: "", policyStatus: null, systemStatus: null, runtimeSwitchJobId: "", runtimeSwitchTarget: "", runtimeSwitchNotified: false, debugInputSource: "camera", debugUpload: null, observationWidth: 640, observationHeight: 480, statusRequestActive: false };
+const state = { mobilityPlugins: [], modelCatalog: { mobility: { plugins: [], active_plugin_id: "" }, models: [] }, datasetCatalog: { episodes: [], exports: [], lerobot: [], archives: [] }, datasetFailureLogJobId: "", datasetFailureLog: "", selectedLerobotPath: "", token: sessionStorage.getItem("vehicleOpsToken") || "", cameraSequence: 0, pipelineCameraSequence: 0, cameraStatus: null, pipelineCameraActive: false, selectedJobId: "", jobs: [], debugRunId: "", debugResult: null, debugImageUrls: {}, pipelineTrace: null, pipelineHistory: [], selectedPipelineStageId: "", selectedPipelineHistoryId: "", inspectorMode: "live", components: [], componentProfiles: [], selectedComponentId: "", storage: null, storageItems: [], selectedStorageCategory: "", systemMode: "", policyStatus: null, systemStatus: null, runtimeSwitchJobId: "", runtimeSwitchTarget: "", runtimeSwitchNotified: false, debugInputSource: "camera", debugUpload: null, observationWidth: 640, observationHeight: 480, statusRequestActive: false, currentView: "monitor", calibrationStatus: null, calibrationRequestActive: false, calibrationImageToken: 0 };
 const text = (id, value) => { $(id).textContent = value ?? "—"; };
 const number = (value, digits = 1) => Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : "--";
 const milliseconds = (value) => {
@@ -97,11 +97,13 @@ function freshness(item) {
   return item.fresh ? "ONLINE" : "STALE";
 }
 function setView(name) {
+  state.currentView = name;
   document.querySelectorAll(".view-panel").forEach((panel) => panel.classList.toggle("active", panel.id === `view-${name}`));
   document.querySelectorAll("[data-view]").forEach((button) => button.classList.toggle("active", button.dataset.view === name));
   history.replaceState(null, "", `#${name}`);
   if (name === "storage") refreshStorage(true);
   if (name === "tools" || name === "capture") refreshDatasets(true);
+  if (name === "calibration") refreshCalibration(true);
 }
 function badge(node, healthy, yes, no) {
   node.className = `pill ${healthy ? "success" : "warning"}`;
@@ -1604,9 +1606,129 @@ $("copyDebugJson").addEventListener("click", async () => {
 document.querySelectorAll("[data-inspector-mode]").forEach((button) => button.addEventListener("click", () => setInspectorMode(button.dataset.inspectorMode)));
 $("refreshPipelineHistory").addEventListener("click", () => refreshPipelineHistory(true));
 $("debugMobilityPlugin")?.addEventListener("change", updateMobilityPluginInfo);
+function calibrationNumber(value, digits = 3) {
+  return Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : "--";
+}
+function setCoverage(id, ready) {
+  const node = $(id);
+  if (node) node.classList.toggle("ready", Boolean(ready));
+}
+function updateCalibrationImages(force = false) {
+  const status = state.calibrationStatus;
+  if (!status || state.currentView !== "calibration") return;
+  const sequence = Number(status.camera?.frame_sequence || 0);
+  const token = force ? ++state.calibrationImageToken : sequence;
+  const preview = $("calibrationPreview");
+  if (status.camera?.frame_available && (force || preview.dataset.sequence !== String(sequence))) {
+    preview.dataset.sequence = String(sequence);
+    preview.src = `/api/camera-calibration/preview.jpg?t=${token}-${Date.now()}`;
+    preview.style.display = "block";
+    $("calibrationPreviewEmpty").style.display = "none";
+    $("calibrationResultOriginal").src = preview.src;
+    $("calibrationResultOriginal").style.display = "block";
+  }
+  if (status.result?.ready) {
+    const undistorted = $("calibrationUndistorted");
+    undistorted.src = `/api/camera-calibration/undistorted.jpg?t=${token}-${Date.now()}`;
+    undistorted.style.display = "block";
+  }
+}
+function renderCalibration(status) {
+  state.calibrationStatus = status;
+  const camera = status.camera || {};
+  const session = status.session || {};
+  const coverage = status.coverage || {};
+  const result = status.result || {};
+  const verification = status.verification || {};
+  const frameFresh = camera.frame_available && Number(camera.frame_age_ms) >= 0 && Number(camera.frame_age_ms) < 3000;
+  text("calibrationCameraState", frameFresh ? "图像正常" : (camera.frame_available ? "图像超时" : "未启动"));
+  text("calibrationExistingState", camera.camera_info_calibrated || status.storage?.calibration_file_valid ? "已标定" : "未标定");
+  text("calibrationSessionState", session.active ? `${session.sample_count || 0} 组样本` : "未开始");
+  text("calibrationVerifyState", verification.verified ? "验证通过" : (verification.pending ? "等待验证" : "未执行"));
+  badge($("calibrationFrameBadge"), frameFresh, "图像正常", camera.frame_available ? "图像超时" : "等待相机");
+  text("calibrationResolution", camera.width ? `${camera.width} × ${camera.height}` : "-- × --");
+  text("calibrationFrameAge", frameFresh ? `${calibrationNumber(camera.frame_age_ms, 0)} ms 前` : "无实时图像");
+  text("calibrationMessage", session.message || "让棋盘完整入镜，依次覆盖画面四周、近远距离和不同倾角。");
+  text("calibrationSampleCount", session.sample_count || 0);
+  text("calibrationSampleTarget", session.minimum_samples || 12);
+  text("calibrationPath", status.storage?.calibration_path || "未配置");
+  const horizontal = coverage.horizontal || [];
+  const vertical = coverage.vertical || [];
+  setCoverage("coverageLeft", horizontal[0]); setCoverage("coverageCenter", horizontal[1]); setCoverage("coverageRight", horizontal[2]);
+  setCoverage("coverageTop", vertical[0]); setCoverage("coverageMiddle", vertical[1]); setCoverage("coverageBottom", vertical[2]);
+  setCoverage("coverageNear", coverage.near); setCoverage("coverageFar", coverage.far); setCoverage("coverageTilt", coverage.tilted);
+  const matrix = result.camera_matrix || [];
+  const distortion = result.distortion_coefficients || [];
+  text("calibrationFx", calibrationNumber(matrix[0])); text("calibrationFy", calibrationNumber(matrix[4]));
+  text("calibrationCx", calibrationNumber(matrix[2])); text("calibrationCy", calibrationNumber(matrix[5]));
+  text("calibrationRms", calibrationNumber(result.rms_error));
+  text("calibrationError", calibrationNumber(result.mean_reprojection_error));
+  text("calibrationDistortion", distortion.length ? distortion.slice(0, 5).map((value) => calibrationNumber(value, 6)).join(" / ") : "--");
+  if (result.ready) {
+    const good = Number(result.mean_reprojection_error) <= 1.0;
+    badge($("calibrationQualityBadge"), good, "误差良好", "误差偏高");
+  } else {
+    $("calibrationQualityBadge").className = "pill neutral";
+    $("calibrationQualityBadge").innerHTML = "<i></i>等待计算";
+  }
+  $("calibrationCapture").disabled = !session.active || !frameFresh;
+  $("calibrationCompute").disabled = !session.active || Number(session.sample_count || 0) < Number(session.minimum_samples || 12);
+  $("calibrationApply").disabled = !result.ready || !$("calibrationConfirm").checked;
+  text("calibrationApplyNote", verification.verified ? "标定已生效" : (result.ready ? "确认检查后可保存并应用" : "计算完成并确认后可应用"));
+  document.querySelectorAll("[data-calibration-step]").forEach((step) => {
+    const name = step.dataset.calibrationStep;
+    const complete = name === "camera" ? frameFresh : name === "capture" ? Number(session.sample_count || 0) >= Number(session.minimum_samples || 12) : name === "compute" ? result.ready : verification.verified;
+    step.classList.toggle("complete", complete);
+    step.classList.toggle("active", !verification.verified && ((name === "camera" && !frameFresh) || (name === "capture" && frameFresh && !result.ready) || (name === "compute" && result.ready && !verification.pending) || (name === "apply" && verification.pending)));
+  });
+  updateCalibrationImages();
+}
+async function refreshCalibration(showError = false) {
+  if (state.calibrationRequestActive || (state.currentView !== "calibration" && !showError)) return;
+  state.calibrationRequestActive = true;
+  try {
+    const response = await fetch("/api/camera-calibration/status", { cache: "no-store" });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.message || `HTTP ${response.status}`);
+    renderCalibration(result);
+  } catch (error) {
+    if (showError) toast(error.message, true);
+  } finally {
+    state.calibrationRequestActive = false;
+  }
+}
+async function calibrationAction(path, body = {}) {
+  const result = await post(path, JSON.stringify(body));
+  toast(result.message);
+  await refreshCalibration(true);
+  updateCalibrationImages(true);
+  return result;
+}
+$("calibrationStartCamera")?.addEventListener("click", async () => {
+  try {
+    const result = await post("/api/components/control", JSON.stringify({ component_id: "front_camera", action: "start", force: false }));
+    toast(result.message);
+    setTimeout(() => refreshCalibration(true), 1200);
+  } catch (error) { toast(error.message, true); }
+});
+$("calibrationRefresh")?.addEventListener("click", () => refreshCalibration(true));
+$("calibrationForm")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const squareSize = Number($("calibrationSquareSize").value);
+  if (!Number.isFinite(squareSize) || squareSize <= 0) { toast("请填写标定板实测单格边长（米）", true); return; }
+  try {
+    await calibrationAction("/api/camera-calibration/start", { camera_name: "front_camera", camera_id: $("calibrationCameraId").value.trim(), board_columns: Number($("calibrationBoardColumns").value), board_rows: Number($("calibrationBoardRows").value), square_size_m: squareSize, minimum_samples: Number($("calibrationMinimumSamples").value) });
+    $("calibrationConfirm").checked = false;
+  } catch (error) { toast(error.message, true); }
+});
+$("calibrationCapture")?.addEventListener("click", async () => { try { await calibrationAction("/api/camera-calibration/capture"); } catch (error) { toast(error.message, true); updateCalibrationImages(true); } });
+$("calibrationCompute")?.addEventListener("click", async () => { try { await calibrationAction("/api/camera-calibration/compute"); } catch (error) { toast(error.message, true); } });
+$("calibrationReset")?.addEventListener("click", async () => { if (!confirm("确认清空当前标定会话和已采集样本？已应用的标定文件不会删除。")) return; try { await calibrationAction("/api/camera-calibration/reset"); $("calibrationConfirm").checked = false; } catch (error) { toast(error.message, true); } });
+$("calibrationConfirm")?.addEventListener("change", () => { $("calibrationApply").disabled = !state.calibrationStatus?.result?.ready || !$("calibrationConfirm").checked; });
+$("calibrationApply")?.addEventListener("click", async () => { if (!confirm("确认覆盖当前前视相机标定？系统会先备份旧文件，再重启相机验证。")) return; try { const result = await calibrationAction("/api/camera-calibration/apply", { confirmed: true }); if (!result.calibration?.verified) toast("文件已保存，但自动验证未通过，请检查前视相机组件", true); } catch (error) { toast(error.message, true); } });
 loadMobilityPlugins();
 setInspectorMode("live");updateCommand();
-setView(["monitor", "capture", "debug", "storage", "tools"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "monitor");
+setView(["monitor", "capture", "debug", "storage", "calibration", "tools"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "monitor");
 refresh();
 refreshPipeline();
 refreshPipelineHistory();
@@ -1730,4 +1852,5 @@ setInterval(refreshComponents, 2000);
 setInterval(() => refreshJobs(), 2000);
 setInterval(() => refreshDatasets(), 5000);
 setInterval(() => refreshModels(), 5000);
+setInterval(() => refreshCalibration(), 1500);
 refreshModels();
